@@ -23,6 +23,7 @@
             reviewMode:false,
             isKPlaylist:false,
             kQuizEntryId: "",
+            banSeek: false,
 
             init: function (embedPlayer,quizPlugin) {
                 var _this = this;
@@ -53,11 +54,20 @@
                     }
                     else {
                         $.quizParams = data[1];
+                        var _uiAttributes = {};
                         $.grep($.quizParams.uiAttributes, function (e) {
+                            _uiAttributes[e.key]=e.value;//copy all uiAttributes to new object
                             if (e.key == "canSkip") {
                                 _this.canSkip = (e.value.toLowerCase() === 'true');
                             }
                         });
+                        if( !_this.canSkip  && _uiAttributes.banSeek
+                          ){
+                            _this.banSeek = (_uiAttributes.banSeek.toLowerCase() === 'true');
+                            if(_uiAttributes.alertText){
+                                _this.alertText = _uiAttributes.alertText;
+                            }
+                        }
                         if (data[0].totalCount > 0) {
                             switch (String(data[0].objects[0].status)) {
                                 case 'quiz.3':

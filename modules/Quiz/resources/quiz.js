@@ -71,6 +71,9 @@
                         embedPlayer.enablePlayControls();
                     }).done(function(data) {
                         mw.log("Quiz: setup is completed, continuing...");
+                        if(_this.KIVQModule.banSeek && !_this.KIVQModule.canSkip){
+                            _this.getPlayer().banSeek = _this.KIVQModule.banSeek;
+                        }
                     });
 
                     _this.KIVQScreenTemplate = new mw.KIVQScreenTemplate(embedPlayer);
@@ -175,7 +178,9 @@
             });
 
             embedPlayer.bindHelper('seeking'+_this.KIVQModule.bindPostfix, function () {
-                _this.isSeekingIVQ = true;
+                if(_this.KIVQModule.canSkip || !_this.KIVQModule.canSkip && !_this.KIVQModule.banSeek){
+                    _this.isSeekingIVQ = true;
+                }
                 mw.log("Quiz: Seeking.. ");
             });
 
