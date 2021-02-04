@@ -1,6 +1,5 @@
 (function ( mw, $ ) {
     "use strict";
-
     // Add chromecast player:
     $( mw ).bind( 'EmbedPlayerUpdateMediaPlayers', function ( event, mediaPlayers ) {
         var chromecastSupportedProtocols = [ 'video/mp4' ];
@@ -27,8 +26,9 @@
         casting: false,
         remotePlayer: null,
         remotePlayerController: null,
+        sessionStateChangedCallback: null,
         CAST_SENDER_V3_URL: '//www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1',
-
+        isInIframeApi: false,
         /**
          * Setup the Chromecast plugin - loads Google Cast Chrome sender SDK and bind his handler.
          */
@@ -37,16 +37,20 @@
                 try {
                     top[ '__onGCastApiAvailable' ] = this.toggleCastButton.bind( this );
                     kWidget.appendScriptUrl( this.CAST_SENDER_V3_URL, null, top.document );
+                    this.isInIframeApi = false;
                 } catch ( e ) {
                     window[ '__onGCastApiAvailable' ] = this.toggleCastButton.bind( this );
-                    kWidget.appendScriptUrl( this.CAST_SENDER_V3_URL );
+                    // PSVAMB-4560
+                    // For some reason, Chrome appends script to a player's iframe parent document unless specified explicitly
+                    kWidget.appendScriptUrl( this.CAST_SENDER_V3_URL, null, window.document );
+                    this.isInIframeApi = true;
                 }
             } else {
                 window[ '__onGCastApiAvailable' ] = this.toggleCastButton.bind( this );
                 kWidget.appendScriptUrl( this.CAST_SENDER_V3_URL );
+                this.isInIframeApi = true;
             }
         },
-
         /**
          * Setup the Chromecast plugin bindings.
          */
@@ -61,12 +65,19 @@
          * @param reason
          */
         toggleCastButton: function ( isAvailable, reason ) {
+            var _this = this;
             this.log( "toggleCastButton: isAvailable=" + isAvailable + ", reason=" + reason );
-            if ( isAvailable ) {
+            var loadWhenReady = function (callback) {
+                _this.callback = callback;
+                _this.embedPlayer.playerReadyFlag ? _this.callback() : _this.bind('playerReady', function () {
+                    _this.callback();
+                });
+            };
+            if (isAvailable) {
                 this.initializeCastApi();
-                this.show();
+                loadWhenReady(this.show);
             } else {
-                this.hide();
+                loadWhenReady(this.hide);
             }
         },
 
@@ -76,19 +87,24 @@
          * 2) Check if a session is already opened.
          */
         initializeCastApi: function () {
-            this.log( "initializeCastApi" );
-            window.chrome = top.chrome || window.chrome;
-            window.cast = top.cast || window.cast;
+            try {
+                window.chrome = this.isInIframeApi ? window.chrome : top.chrome;
+                window.cast = this.isInIframeApi ? window.cast : top.cast;
+            } catch (e) {
+                this.log( "Error: unable to initialize cast API");
+                return;
+            }
 
             var options = {};
             options.receiverApplicationId = this.getConfig( "applicationID" ).toString();
             options.autoJoinPolicy = chrome.cast.AutoJoinPolicy.ORIGIN_SCOPED;
             cast.framework.CastContext.getInstance().setOptions( options );
 
+            this.sessionStateChangedCallback = this.onSessionStateChanged.bind(this);
+            this.toggleSessionStateChangedListener(true);
+
             this.remotePlayer = new cast.framework.RemotePlayer();
             this.remotePlayerController = new cast.framework.RemotePlayerController( this.remotePlayer );
-
-            setTimeout( this.checkIfAlreadyConnected.bind( this ), 100 );
         },
 
         isSafeEnviornment: function () {
@@ -96,19 +112,11 @@
         },
 
         /**
-         * Handles the use case of refreshing the page while casting.
-         */
-        checkIfAlreadyConnected: function () {
-            if ( this.remotePlayer.isConnected ) {
-                this.switchToRemotePlayer();
-            }
-        },
-
-        /**
          * Responsible for the logic which happens when we clicking the cast button.
          * @returns {boolean}
          */
         toggleCast: function () {
+            this.toggleSessionStateChangedListener(false);
             this.log( "toggleCast: isDisabled=" + this.isDisabled + ", isCasting=" + this.casting );
             if ( this.isDisabled ) {
                 return false;
@@ -124,6 +132,40 @@
                     this.switchToRemotePlayer.bind( this ),
                     this.launchError.bind( this )
                 );
+            }
+        },
+
+        onSessionStateChanged: function (event) {
+            var sessionState = event.sessionState;
+            switch (sessionState) {
+                case cast.framework.SessionState.SESSION_RESUMED: {
+                    this.switchToRemotePlayer();
+                    break;
+                }
+                case cast.framework.SessionState.SESSION_STARTED: {
+                    if (!this.casting) {
+                        this.showConnectingMessage();
+                        this.embedPlayer.disablePlayControls(["chromecast"]);
+                        this.switchToRemotePlayer();
+                    }
+                    break;
+                }
+                case cast.framework.SessionState.SESSION_ENDED: {
+                    if (this.casting) {
+                        this.switchToLocalPlayer();
+                    }
+                    break;
+                }
+                default:
+                    break;
+            }
+        },
+
+        toggleSessionStateChangedListener: function (enable) {
+            if (enable) {
+                cast.framework.CastContext.getInstance().addEventListener(cast.framework.CastContextEventType.SESSION_STATE_CHANGED, this.sessionStateChangedCallback);
+            } else {
+                cast.framework.CastContext.getInstance().removeEventListener(cast.framework.CastContextEventType.SESSION_STATE_CHANGED, this.sessionStateChangedCallback);
             }
         },
 
@@ -159,6 +201,7 @@
                 _this.updateTooltip( _this.stopCastTitle );
                 _this.showLoadingMessage();
                 _this.embedPlayer.setupRemotePlayer( _this.remotePlayer, _this.remotePlayerController, playbackParams );
+                _this.toggleSessionStateChangedListener(true);
             } );
         },
 
@@ -167,13 +210,17 @@
          * @returns {{currentTime: *, duration: *, volume: (*|Float)}}
          */
         getEmbedPlayerPlaybackParams: function () {
-            return {
+            var playbackParams= {
                 currentTime: this.embedPlayer.getPlayerElementTime(),
                 duration: this.embedPlayer.getDuration(),
                 volume: this.embedPlayer.getPlayerElementVolume(),
                 state: this.embedPlayer.currentState,
-                captions: this.embedPlayer.getInterface().find( '.track' )
+                captions: null
+            };
+            if (this.embedPlayer.plugins && this.embedPlayer.plugins.closedCaptions){
+                playbackParams.captions = this.embedPlayer.plugins.closedCaptions.selectedSource;
             }
+            return playbackParams;
         },
 
         /**
@@ -195,6 +242,7 @@
             this.embedPlayer.updatePlaybackInterface( function () {
                 _this.embedPlayer.addPlayerSpinner();
                 _this.embedPlayer.seek( seekTo, stopAfterSeek );
+                _this.toggleSessionStateChangedListener(true);
             } );
         },
 
@@ -206,6 +254,7 @@
             this.log( "launchError: " + this.getErrorMessage( errorCode ) );
             this.embedPlayer.layoutBuilder.closeAlert();
             this.embedPlayer.enablePlayControls();
+            this.toggleSessionStateChangedListener(true);
         },
 
         /**

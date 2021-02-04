@@ -209,7 +209,7 @@ class UiConfResult {
 
 		// Add Core plugins
 		$basePlugins = array(
-			'statistics' => array(),
+			//'statistics' => array(),
 			'controlBarContainer' => array(),
 			'qualitySettings' => array(),
 			'morePlugins' => array(),
@@ -219,7 +219,6 @@ class UiConfResult {
 			'liveStatus' => array(),
 			'reportError' => array(),
 			"sideBarContainer" => array(),
-			"liveAnalytics"=>array(),
 			"kAnalony"=>array(),
 			"hlsjs"=>array(),
 			"unMuteOverlayButton"=>array(),

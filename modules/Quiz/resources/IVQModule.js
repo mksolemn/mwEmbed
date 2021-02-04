@@ -9,10 +9,15 @@
     if (!(mw.KIVQModule.prototype = {
             kQuizUserEntryId: null,
             score: null,
+            currentScore: null ,
+            calculatedScore: null ,
+            scoreType: undefined ,
+            retakeNumber: undefined,
             embedPlayer: null,
             quizPlugin: null,
             showGradeAfterSubmission: false,
             canSkip: false,
+            showWelcomePage: true,
             hexPosContainerPos: 0,
             sliceArray: [],
             isErr: false,
@@ -22,53 +27,99 @@
             bindPostfix: '.quizPlugin',
             reviewMode:false,
             isKPlaylist:false,
+            answeredCurrent:true,
+            answerTryouts:0,
+            questionIndex:-1,
             kQuizEntryId: "",
+            QUESTIONS_TYPE: {
+                MULTIPLE_CHOICE_ANSWER: 1,
+                TRUE_FALSE: 2,
+                REFLECTION_POINT: 3,
+                MULTIPLE_ANSWER_QUESTION: 4,
+                FILL_IN_BLANK: 5,
+                HOT_SPOT: 6,
+                GO_TO: 7,
+                OPEN_QUESTION: 8,
+            },
 
             init: function (embedPlayer,quizPlugin) {
                 var _this = this;
-
                 _this.kQuizEntryId = embedPlayer.kentryid;
                 _this.KIVQApi = new mw.KIVQApi(embedPlayer);
                 _this.KIVQScreenTemplate = new mw.KIVQScreenTemplate(embedPlayer);
-
                 this.destroy();
                 this.embedPlayer = embedPlayer;
                 this.quizPlugin = quizPlugin;
             },
-
             setupQuiz:function(){
                 var _this = this,
                     deferred = $.Deferred();
 
                 _this.KIVQApi.getUserEntryIdAndQuizParams( function(data) {
+                    // validate data integrity 
                     if (!_this.checkApiResponse('User Entry err-->', data[0])) {
                         return false;
                     }
                     if (!_this.checkApiResponse('Quiz Params err-->', data[1])) {
                         return false;
                     }
-                    if ( !("uiAttributes" in data[1])) {
+                    var userEntryData = data[0];
+                    var quizParamsData = data[1];
+                    if ( !("uiAttributes" in quizParamsData)) {
                         deferred.reject(data, 'quiz is empty');
                         return deferred;
                     }
                     else {
-                        $.quizParams = data[1];
+                        $.quizParams = quizParamsData;
+                        _this.scoreType = quizParamsData.scoreType ? quizParamsData.scoreType : 0; 
+                        var dataForBanSeek = {
+                            status: false,
+                            alertText: ''
+                        };
                         $.grep($.quizParams.uiAttributes, function (e) {
+                            
+                            if (e.key == "banSeek" && e.value) {
+                                dataForBanSeek.status = e.value.toLowerCase() === 'true';
+                            }
+                            if (e.key == "noSeekAlertText") {
+                                dataForBanSeek.alertText =  e.value;
+                            }
                             if (e.key == "canSkip") {
                                 _this.canSkip = (e.value.toLowerCase() === 'true');
+                            } else if (e.key == "showWelcomePage") {
+                                _this.showWelcomePage = (e.value.toLowerCase() === 'true');
                             }
                         });
-                        if (data[0].totalCount > 0) {
-                            switch (String(data[0].objects[0].status)) {
+                        $.quizParams.allowSeekForward = dataForBanSeek.status;
+
+                        //send notification to banSeekManager with params from Editor
+                        if(dataForBanSeek.status && !_this.canSkip){
+                            _this.embedPlayer.sendNotification('activateBanSeek',dataForBanSeek);
+                        }
+                        // handle user entry 
+                        if (userEntryData.totalCount > 0) {
+                            // calculate how many times we are allowed to take this quiz 
+                            _this.retakeNumber = userEntryData.objects[0].version ? userEntryData.objects[0].version : 0; // support old quiz that do not have version
+                            _this.currentScore = Math.round(userEntryData.objects[0].calculatedScore * 100);
+                            if(isNaN(_this.currentScore) && userEntryData.objects.length > 1  ){
+                                // we need to grab the score from previous userEntry ()
+                                var latestVersion = userEntryData.objects[0].version;
+                                if(userEntryData.objects[latestVersion] && userEntryData.objects[latestVersion].hasOwnProperty("calculatedScore") ){
+                                    _this.currentScore = userEntryData.objects[latestVersion].calculatedScore;
+                                }
+                            }
+                            _this.calculatedScore = _this.currentScore/100;
+                            switch (String(userEntryData.objects[0].status)) {
                                 case 'quiz.3':
                                     if ($.quizParams.showGradeAfterSubmission) {
-                                        _this.score = Math.round(data[0].objects[0].score * 100);
+                                        _this.score = Math.round(userEntryData.objects[0].score * 100);
                                     }
                                     _this.quizSubmitted = true;
                                     break;
                                 case '1':
                                     break;
                                 case '2':
+                                    // TODO - check this 
                                     _this.errMsg('quiz deleted', data);
                                     return false;
                                     break;
@@ -98,7 +149,6 @@
             getQuestionsAndAnswers: function (callback) {
                 var _this = this;
                 _this.KIVQApi.getQuestionAnswerCuepoint(_this.kQuizEntryId, _this.kQuizUserEntryId, function(data){
-
                     if (!_this.checkApiResponse('Get question err -->',data[0])){
                         return false;
                     }
@@ -128,22 +178,24 @@
             },
             setSubmitQuiz:function(){
                 var _this = this;
-
                 _this.KIVQApi.submitQuiz(_this.kQuizUserEntryId, function(data){
-
+                    
                     if (!_this.checkApiResponse('Submit Quiz err -->',data)){
                         return false;
                     }
                     else{
+                        _this.sendIVQMesageToListener("QuizSubmitted", _this.kQuizUserEntryId);
                         $.cpObject = {};
                         _this.getQuestionsAndAnswers(_this.populateCpObject);
-
+                        // store current score for next retake screen 
+                        if(data.hasOwnProperty("calculatedScore")){
+                            _this.calculatedScore = data.calculatedScore;
+                        }
                         _this.checkCuepointsReady(function(){
                             _this.score = Math.round(data.score *100);
                             _this.quizPlugin.ssSubmitted(_this.score);
                             _this.quizSubmitted = true;
                         });
-                        _this.sendIVQMesageToListener();
                     }
                 });
             },
@@ -162,8 +214,11 @@
                 var cpArray = [];
                 for (var i = 0; i < (data[0].objects.length); i++) {
                     var arr = [];
+                    // data[0] refers to the questions 
                     $.each(data[0].objects[i].optionalAnswers, function (key, value) {
-                        arr.push(value.text.toString());
+                        if(value.text){
+                            arr.push(value.text.toString());
+                        }
                     });
                     var ansP = {
                         isAnswerd: false,
@@ -173,6 +228,7 @@
                         correctAnswerKeys: null,
                         explanation: null
                     };
+                    // data[1] refers to the answers by this user 
                     if (!$.isEmptyObject(data[1].objects)) {
                         $.grep(data[1].objects, function (el) {
                             if (el.parentId === data[0].objects[i].id) {
@@ -182,6 +238,12 @@
                                 ansP.isCorrect = el.isCorrect;
                                 ansP.correctAnswerKeys = el.correctAnswerKeys;
                                 ansP.explanation = el.explanation;
+                                if(el.openAnswer){
+                                    ansP.openAnswer = el.openAnswer;
+                                }
+                                if(el.feedback){
+                                    ansP.feedback = el.feedback.split('||');
+                                }
                                 return el
                             }
                         });
@@ -199,30 +261,59 @@
                         startTime: data[0].objects[i].startTime,
                         cpId: data[0].objects[i].id,
                         cpEntryId: data[0].objects[i].entryId,
-                        answerCpId: ansP.answerCpId
+                        answerCpId: ansP.answerCpId,
+                        openAnswer: ansP.openAnswer,
+                        questionType: data[0].objects[i].questionType,
+                        feedback: $(ansP.feedback).get(-1),
                     });
                 }
                 $.cpObject.cpArray = cpArray;
             },
-
+            
             checkIfDone: function (questionNr) {
+                mw.log("Quiz: checkIfDone begin");
                 var _this = this;
                 if(_this.isErr){
-                    return
+                    mw.log("Quiz: checkIfDone Error");
+                    return;
                 }
+                if(!_this.answeredCurrent && questionNr){
+                    mw.log("Quiz: Reached timeout with no response from server");
+                    _this.answerTryouts++;
+                    // the current answer were not responded - check again in 500 ms 
+                    setTimeout(function(){
+                        mw.log("Quiz: checkIfDone setTimeout" , _this.answerTryouts );
+                        if(_this.answerTryouts >=6 ){
+                            mw.log("Quiz: failed after 7 checks (~5 sec)- assume BE problem. Stop and show error message");
+                            _this.answerTryouts = 0;
+                            _this.questionIndex = questionNr;
+                            _this.errMsg('answer-not-received' );
+                            return;
+                        }
+                        mw.log("Quiz: check server response again");
+                        _this.checkIfDone(questionNr);
+                    },500);
+                    return;
+                }
+                mw.log("Quiz: checkIfDone - pass checkIfDone");
+                _this.embedPlayer.getInterface().find(".screen.quiz").removeClass("answering");
+                _this.answerTryouts = 0;
                 if ($.cpObject.cpArray.length === 0){
+                    mw.log("Quiz: no cp to process");
                     _this.continuePlay();
-                    return
+                    return;
                 }
                 if (_this.quizSubmitted) {
+                    mw.log("Quiz: quizSubmitted !");
                     _this.quizPlugin.ssSubmitted(_this.score);
-                }
-                else{
+                }else{
                     var anUnswered = _this.getUnansweredQuestNrs();
-                    if (!anUnswered){
+                    if (!anUnswered.length){
+                        mw.log("Quiz: anUnswered");
                         _this.reviewMode = true;
                     }
                     if (($.cpObject.cpArray.length - 1) === questionNr){
+                        mw.log("Quiz: quizEndFlow");
                         _this.quizEndFlow = true;
                     }
                     _this.continuePlay();
@@ -251,12 +342,9 @@
             },
             cuePointReachedHandler: function (e, cuePointObj) {
                 var _this = this;
-                if (!$.quizParams.showCorrectAfterSubmission && _this.quizSubmitted) {
-                    return
-                }
                 $.each($.cpObject.cpArray, function (key, val) {
                     if ($.cpObject.cpArray[key].startTime === cuePointObj.cuePoint.startTime) {
-                        _this.quizPlugin.ssSetCurrentQuestion(key,false);
+                        _this.quizPlugin.ssSetCurrentQuestion(key);
                     }
                 });
             },
@@ -290,34 +378,52 @@
                     }
                 });
                 if ($.isEmptyObject(unanswerdArr)){
-                    return false;
+                    return [];
                 }
                 else {
                     return unanswerdArr;
                 }
             },
-
-            submitAnswer:function(questionNr,selectedAnswer){
+            /**
+             * This serves reqular questions and also open-question. It is not expected to get both selectedAnswer and openQuestionText
+             * @param {*} questionNr 
+             * @param {*} selectedAnswer 
+             * @param {*} openQuestionText 
+             */
+            submitAnswer:function(questionNr,selectedAnswer,openQuestionText){
+                mw.log("Quiz: submitAnswer " + questionNr + " " + selectedAnswer + " " + openQuestionText);
                 var _this = this,isAnswered;
-
+                this.answeredCurrent = false;
+                _this.embedPlayer.getInterface().find(".screen.quiz").addClass("answering");
                 $.cpObject.cpArray[questionNr].selectedAnswer = selectedAnswer;
-
                 if ($.cpObject.cpArray[questionNr].isAnswerd) {
+                    mw.log("Quiz: submitAnswer - answered" );
                     isAnswered = true;
-                }
-                else{
+                }else{
+                    mw.log("Quiz: submitAnswer - not answered" );
                     isAnswered = false;
                     $.cpObject.cpArray[questionNr].isAnswerd = true;
                 }
-
                 _this.KIVQApi.addAnswer(isAnswered,_this.i2q(selectedAnswer),_this.kQuizUserEntryId,questionNr,function(data){
-
+                    mw.log("Quiz: addAnswer callback" ,data );
                     if (!_this.checkApiResponse('Add question err -->',data)){
+                        mw.log("Quiz: submitAnswer Add question err" );
                         return false;
                     }else {
+                        mw.log("Quiz: addAnswer OK" );
+                        _this.answeredCurrent = true;
+                        var ivqNotificationData = {
+                            questionIndex: questionNr,
+                            questionType: $.cpObject.cpArray[questionNr].questionType,
+                            questionText: $.cpObject.cpArray[questionNr].question,
+                            answer: selectedAnswer || openQuestionText,
+                            attemptNumber: $.quizParams.version
+                        };
+                        mw.log("Quiz: addAnswer data" , ivqNotificationData );
+                        _this.sendIVQMesageToListener("QuestionAnswered", ivqNotificationData);
                         $.cpObject.cpArray[questionNr].answerCpId = data.id;
                     }
-                })
+                },openQuestionText);
             },
             bubbleSizeSelector: function (isFullScreen) {
                 var _this = this, buObj = {bubbleAnsSize: "", bubbleUnAnsSize: ""};
@@ -346,11 +452,17 @@
             quizEndScenario:function(){
                 var _this = this,anUnswered = _this.getUnansweredQuestNrs();
                 _this.embedPlayer.stopPlayAfterSeek = true;
-                if (anUnswered) {
+                if ( anUnswered.length ) {
+                    // there are still unanswered questions - show "almost done" screen 
                     _this.quizEndFlow = true;
                     _this.quizPlugin.ssAlmostDone(anUnswered);
                 }else if (!_this.quizSubmitted){
+                    // the quiz has unanswered questions and was not sumitted yet - show "submit" screen (ssAllCompleted)
                     _this.quizPlugin.ssAllCompleted();
+                }else if(!_this.quizEndFlow){
+                    // Quiz is already submitted - show the "submitted" screen
+                    _this.quizPlugin.ssSubmitted(_this.score); 
+
                 }
             },
             displayHex:function (hexPositionContDisplay,cpArray){
@@ -443,13 +555,20 @@
                     el = document.createElement('li');
                     var questionHexType = (function () {
                         if (data.isCorrect===null || data.isCorrect){
-                            return 'q-box';
+                            return 'q-box ';
                         }
                         else {
-                            return 'q-box-false';
+                            return 'q-box q-box-false';
                         }
                     })();
+                    if(data.questionType === _this.QUESTIONS_TYPE.REFLECTION_POINT){
+                        questionHexType += ' reflection-point-question';
+                    }
+                    if(data.questionType === _this.QUESTIONS_TYPE.OPEN_QUESTION){
+                        questionHexType += ' open-question';
+                    }
                     $(el).addClass(questionHexType).attr("id", data.key).append(_this.i2q(data.key));
+                    $(el).append('<div class="mask" />')
                     switch(rowNumber){
                         case 0:$(ol).addClass('first-row');break;
                         case 1:$(ol).addClass('second-row');break;
@@ -501,15 +620,17 @@
             q2i: function (i) {
                 return parseInt(i) - 1;
             },
+
             showQuizOnScrubber:function(){
                 var _this = this;
                 mw.log("Quiz: Show Quiz on Scrubber");
                 _this.quizPlugin.displayBubbles();
-                //!_this.quizSubmitted for IOS9 Android5 &&
-                if (_this.quizEndFlow && !_this.quizSubmitted){
+                if ( (_this.quizEndFlow && !_this.quizSubmitted )
+                        || $.quizParams.attemptsAllowed ){
                     _this.showQuizEndOnScrubber();
                 }
             },
+
             hideQuizOnScrubber:function(){
                 var _this = this;
                 this.embedPlayer.getInterface().find(".bubble-cont").empty().remove();
@@ -534,32 +655,58 @@
                     return true;
                 }
             },
-            sendIVQMesageToListener:function(){
-                try {
-                    var _this = this;
-                    window.kdp = document.getElementById( _this.embedPlayer.id );
-                    window.kdp.sendNotification("QuizSubmitted", _this.kQuizUserEntryId);
-                    mw.log('Quiz: QuizSubmitted sent to kdp');
-                } catch (e) {
-                    mw.log('postMessage listener of parent is undefined: ', e);
+            sendIVQMesageToListener:function(event, payload){
+              this.embedPlayer.sendNotification(event, payload);
+            },
+            backToQuestion:function(e){
+                if(e && e.type === "keydown" && e.keyCode !== "13"){
+                    return;
                 }
+                this.isErr = false;
+                if( !$.cpObject.cpArray[this.questionIndex].openAnswer ){
+                    $.cpObject.cpArray[this.questionIndex].isAnswerd = false; // clear previous selection 
+                }else{
+                    $.cpObject.cpArray[this.questionIndex].openQuestionFailed = true;
+                }
+                this.gotoScrubberPos(this.questionIndex);
+                this.answeredCurrent=true;
+                this.answerTryouts=0;
+                this.questionIndex=-1;
             },
             errMsg:function(errMsg,data){
                 var _this = this;
-                if (data.code ==="PROVIDED_ENTRY_IS_NOT_A_QUIZ"){
-                    return
+                _this.embedPlayer.getInterface().find(".screen.quiz").removeClass("answering");
+                if (data && data.code ==="PROVIDED_ENTRY_IS_NOT_A_QUIZ"){
+                    return;
                 }
                 mw.log(errMsg, data);
+                var isAnswerError = errMsg === "answer-not-received" ;
                 _this.quizPlugin.ivqShowScreen();
-                _this.KIVQScreenTemplate.tmplErrorScreen();
-                $(".sub-text").html(gM('mwe-quiz-err-msg'));
+                _this.KIVQScreenTemplate.tmplErrorScreen(isAnswerError);
+                if(isAnswerError){
+                    $(".sub-text").html(gM('mwe-quiz-submit-failed-description'));
+                }else{
+                    $(".sub-text").html(gM('mwe-quiz-err-msg'));
+                }
                 _this.isErr = true;
+                $("#back-to-question").click(function(){
+                    _this.backToQuestion();
+                }).on('keydown', _this.backToQuestion);
+            },
+            retake: function (callback){
+                this.KIVQApi.retake(callback);
             },
             destroy: function () {
-
-                var _this = this;
-                clearInterval(_this.intrVal);
-                _this.intrVal = null;
+                this.answeredCurrent=true;
+                this.answerTryouts=0;
+                this.questionIndex=-1;
+                this.score = undefined;
+                this.currentScore = undefined;
+                this.scoreType = undefined;
+                this.quizEndFlow = false;
+                this.quizSubmitted = false;
+                clearInterval(this.intrVal);
+                this.intrVal = null;
             },
             unloadQuizPlugin:function(embedPlayer){
               var _this = this;
@@ -569,7 +716,8 @@
                 embedPlayer.unbindHelper(_this.bindPostfix);
                 embedPlayer.removeJsListener(_this.bindPostfix);
                 _this.hideQuizOnScrubber();
-                mw.log("Quiz: Plugin Unloaded");            }
+                mw.log("Quiz: Plugin Unloaded");     
+            }
         })) {
     }
 })(window.mw, window.jQuery );

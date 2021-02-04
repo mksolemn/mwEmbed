@@ -105,7 +105,7 @@ class mwEmbedLoader {
 		
 		// check for non-fatal errors: 
 		if( $this->getError() ){
-			echo "if( console ){ console.log('" . json_encode($this->getError()) . "'); }";
+			echo "if( console ){ console.log('" . json_encode(htmlspecialchars( is_string($this->getError()) ? $this->getError() : json_encode($this->getError()), ENT_QUOTES)) . "'); }";
 		}
 		// output the script output
 		echo $o;
@@ -399,6 +399,8 @@ class mwEmbedLoader {
 			'Kaltura.UseManifestUrls' => $wgKalturaUseManifestUrls,
 			'Kaltura.Protocol'	=>	$wgHTTPProtocol,
 			'Kaltura.ServiceUrl' => $wgKalturaServiceUrl,
+			'Kaltura.thumbAssetServiceUrl' => $wgKalturaServiceUrl,
+			'Kaltura.playManifestServiceUrl' => $wgKalturaServiceUrl,
 			'Kaltura.ServiceBase' => $wgKalturaServiceBase,
 			'Kaltura.CdnUrl' => $wgKalturaCDNUrl,
 			'Kaltura.StatsServiceUrl' => $wgKalturaStatsServiceUrl,

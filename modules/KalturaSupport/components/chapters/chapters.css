@@ -7,15 +7,23 @@
     width: 100%;
     height: 100%;
 }
+
+.searchFormWrapper ::-webkit-input-placeholder {
+    color:  #595959;
+}
+.searchFormWrapper ::-moz-placeholder {
+    color:  #595959;
+}
+.searchFormWrapper :-ms-input-placeholder {
+    color:  #595959;
+}
+.searchFormWrapper :-moz-placeholder {
+    color: #595959;
+}
 .chapters .unselectable {
     -moz-user-select: -moz-none;
     -khtml-user-select: none;
     -webkit-user-select: none;
-
-    /*
-      Introduced in IE 10.
-      See http://ie.microsoft.com/testdrive/HTML5/msUserSelect/
-    */
     -ms-user-select: none;
     user-select: none;
 }
@@ -161,7 +169,6 @@
     z-index: 2;
     opacity: 0.68;
     filter: alpha(opacity=68);
-    text-transform: capitalize;
     overflow: hidden;
 }
 .chapters > .k-chapters-container .k-title-container{
@@ -187,7 +194,7 @@
     rgba(0, 0, 0, 0.65) 60%, rgba(0, 0, 0, 0.30196) 100%);
     background: rgb(0, 0, 0);
     -ms-filter: progid:DXImageTransform.Microsoft.Alpha(opacity=60);
-    background: rgba(0, 0, 0, 0.7);
+    background: rgba(0,0,0,1);
 }
 
 .chapters > .k-chapters-container .chapterRibbon{
@@ -253,6 +260,9 @@
     bottom: 0;
     right: 0;
     z-index: 2;
+    color: white;
+    border: none;
+    background: transparent;
     margin: 0 20px 12px 0;
     font-size: 30px;
     -webkit-transition: -webkit-transform 0.5s ease-out;
@@ -439,9 +449,6 @@
     box-sizing: border-box;
     padding: 2px;
     width: 11px;
-}
-.touch .nano-pane   {
-    display: none !important;
 }
 .nano > .nano-pane:hover, .nano-pane:active {
     cursor: pointer;

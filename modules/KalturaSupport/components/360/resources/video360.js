@@ -1,8 +1,9 @@
 (function (mw, $, THREE) {
 	"use strict";
 
-	mw.PluginManager.add('video360', mw.KBaseComponent.extend({
+	var DEFAULT_ASPECT = 640/360;
 
+	mw.PluginManager.add('video360', mw.KBaseComponent.extend({
 		defaultConfig: {
 			// vr button default config
 			align: "right",
@@ -12,10 +13,10 @@
 			order: 70,
 			// 360 default config
 			moveMultiplier: 0.5,
-			mobileVibrationValue: (mw.isIOS() ? 0.0365 : 2.5),
+            mobileVibrationValue: (mw.isAndroidNativeBrowser() ? 1 : 0.02),
 			cameraOptions: {
 				fov: 75,
-				aspect: window.innerWidth / window.innerHeight,
+				aspect: Math.max(window.innerWidth / window.innerHeight, DEFAULT_ASPECT),
 				near: 0.1,
 				far: 1000
 			}
@@ -35,6 +36,7 @@
 			"right": "68",  // 'D'
 			"down": "83"   // 'S'
 		},
+		getCanvasSizeInterval: null,
 
 		isSafeEnviornment: function () {
 			return !( mw.isIE8() || mw.isIE9() || mw.isIE10Comp() || // old IEs
@@ -116,9 +118,28 @@
 			this.bind("playing", function () {
 				$(this.video).hide();
 				$(this.getPlayer()).css("z-index", "-1");
-				var canvasSize = this.getCanvasSize();
-				this.renderer.setSize(canvasSize.width, canvasSize.height);
-				this.render();
+				this.log('Obtaining video size for 360 canvas');
+				var setCanvasSize = function () {
+					var canvasSize = this.getCanvasSize();
+					this.renderer.setSize(canvasSize.width, canvasSize.height);
+					this.render();
+				}.bind(this);
+				if (this.video.videoWidth) {
+					setCanvasSize();
+				} else {
+					var getCanvasSizeIntervalCounter = 0;
+					this.getCanvasSizeInterval = setInterval(function () {
+						if (this.video.videoWidth) {
+							clearInterval(this.getCanvasSizeInterval);
+							setCanvasSize();
+						} else if (getCanvasSizeIntervalCounter++ === 600) {
+							// can't get the video.videoWidth in a minute
+							clearInterval(this.getCanvasSizeInterval);
+							this.log('Unable to obtain video size for 360 canvas');
+							this.getPlayer().triggerHelper('embedPlayerError',{message: 'Unable to obtain video size for 360 canvas'});
+						}
+					}.bind(this), 100);
+				}
 			}.bind(this));
 
 			this.bind("doStop", function () {
@@ -345,6 +366,8 @@
 
 		clean: function () {
 			cancelAnimationFrame(this.requestId);
+			clearInterval(this.getCanvasSizeInterval);
+			this.getCanvasSizeInterval = null;
 			$(this.canvas).remove();
 			$(this.getPlayer()).css('z-index', 0);
 			this.removeBindings();

@@ -6,6 +6,7 @@
 			"parent": "controlsContainer",
 			"order": 62,
 			"displayImportance": "high",
+			"filterByDisplayOnPlayer": true,
 			"iconClass": "icon-cc",
 			"align": "right",
 			"showTooltip": true,
@@ -38,6 +39,8 @@
 		lastActiveCaption: null,
 		updateLayoutEventFired: false,
 		ended: false,
+        selectTextTrackTimeoutId: null,
+		isCaptionsShown: null,
 
 		setup: function(){
 			var _this = this;
@@ -52,9 +55,12 @@
 				this.setConfig('displayCaptions', false );
 			}
 
-			if(_this.getConfig("enableOptionsMenu")){
-				this.optionsMenu = new mw.closedCaptions.cvaa(this.getPlayer(), function () {
-				}, "cvaa");
+            if(_this.getConfig("enableOptionsMenu")){
+                this.optionsMenu = new mw.closedCaptions.cvaa(this.getPlayer(), function () {
+                    if ( _this.getConfig('layout') === 'below') {
+                        this.setBelowConfig();
+                    }
+                }, "cvaa");
 
 				if(!this.optionsMenu.isSafeEnviornment()){
 					this.setConfig('enableOptionsMenu', false );
@@ -75,7 +81,13 @@
 				}
 			});
 
+			if ( this.isNativeIOSPlayback() ) {
+				this.setConfig('showEmbeddedCaptions', true);
+			}
+
 			if ( this.getConfig('showEmbeddedCaptions') === true ) {
+				//Set CC layout to ontop with embedded captions as it dose not use the allocated space for below CC
+                this.setConfig('layout', "ontop" );
 
 				if ( this.getConfig('showEmbeddedCaptionsStyle') === true ) {
 					this.bind( 'textTrackIndexChanged', function( e, captionData ) {
@@ -111,7 +123,7 @@
 					}
 				} );
 			} else {
-				this.bind( 'playing', function () {
+				this.bind( 'playing seeking', function () {
 					// hide native text tracks since 'showEmbeddedCaptions' is false
 					setTimeout(function () {
 						_this.embedPlayer.hideTextTrack();
@@ -119,10 +131,10 @@
 				});
 				if (!this.getConfig("useExternalClosedCaptions")) {
 					this.bind( 'playerReady', function () {
-						_this.destory();
-						_this.setupTextSources( function () {
-							_this.buildMenu( _this.textSources );
-						} );
+                        _this.destory();
+                        _this.setupTextSources( function () {
+                            _this.buildMenu( _this.textSources );
+                        } );
 					} );
 					outOfBandCaptionEventHandlers.call(this);
 				}
@@ -217,11 +229,13 @@
 				}
 			});
 
-			if( this.getConfig('layout') == 'below'){
-				this.updateBelowVideoCaptionContainer();
+			this.isCaptionsShown = !!this.getConfig('displayCaptions');
+
+			if( this.getConfig('layout') === 'below'){
+                this.updateBelowVideoCaptionContainer();
 			}
 
-			if ( this.getConfig('layout') == 'ontop' ) {
+			if ( this.getConfig('layout') === 'ontop' ) {
 				this.bind('onHideControlBar onShowControlBar', function (event, layout) {
 					if (!_this.ended && _this.getPlayer().isOverlayControls()) {
 						_this.defaultBottom = layout.bottom;
@@ -233,12 +247,16 @@
 			}
 
 			this.bind("AdSupport_StartAdPlayback", function(){
-				_this.setConfig('displayCaptions', false);
-				_this.hideCaptions();
+				if (_this.isCaptionsShown) {
+					_this.setConfig('displayCaptions', false);
+					_this.hideCaptions();
+				}
 			});
 			this.bind("AdSupport_EndAdPlayback", function(){
-				_this.setConfig('displayCaptions', true);
-				_this.showCaptions();
+				if (_this.isCaptionsShown) {
+					_this.setConfig('displayCaptions', true);
+					_this.showCaptions();
+				}
 			});
 			this.bind("playSegmentEvent", function(){
 				_this.updateTimeOffset();
@@ -256,15 +274,16 @@
 			});
 			this.bind( 'onChangeMedia', function (e, stylesObj){
 				//Reset UI state on change media
+                _this.destory();
 				_this.getBtn().show();
 			});
 			this.bind( 'onOpenFullScreen', function (){
-				if ( mw.isIOS() && !mw.isIpad() && _this.isNativeFullScreenEnabled() && _this.selectedSource ) {
+				if ( mw.isIOS() && _this.isNativeFullScreenEnabled() && _this.selectedSource ) {
 					_this.embedPlayer.selectDefaultCaption(_this.selectedSource.srclang);
 				}
 			});
 			this.bind( 'onCloseFullScreen', function (){
-				if ( mw.isIOS() && !mw.isIpad() && _this.isNativeFullScreenEnabled() ) {
+				if ( mw.isIOS() && _this.isNativeFullScreenEnabled() ) {
 					var nativeSource = _this.embedPlayer.getActiveSubtitle();
 					_this.embedPlayer.hideTextTrack();
 					if (nativeSource) {
@@ -279,6 +298,9 @@
 					}
 				}
 			});
+		},
+		isNativeIOSPlayback: function() {
+			return mw.isIOS() && !mw.isIpad() && !mw.getConfig('EmbedPlayer.WebKitPlaysInline');
 		},
 		isNativeFullScreenEnabled: function () {
 			return ( mw.getConfig('EmbedPlayer.EnableIpadNativeFullscreen') && this.embedPlayer.getPlayerElement().webkitSupportsFullscreen );
@@ -426,6 +448,12 @@
 					this.setTextSource(this.selectedSource, false);
 				}
 			}
+			if (!this.selectedSource && this.isNativeIOSPlayback()) {
+				var source = this.selectDefaultSource();
+				if (source) {
+					this.selectDefaultIosTrack(source.srclang);
+				}
+			}
 		},
 		textSourcesInSources: function(sources, textSource){
 			for ( var  i = 0; i < sources.length; i++ ){
@@ -470,6 +498,15 @@
 							_this.getBtn().hide();
 						}
 
+					}
+					if(_this.getConfig("filterByDisplayOnPlayer")){
+						data.objects = $.grep(data.objects , function (item) {
+							// also handle legacy captions items that do not have the field displayOnPlayer
+							if(item.hasOwnProperty("displayOnPlayer") && !item.displayOnPlayer){
+								return false;
+							}
+							return true;
+						});
 					}
 					_this.loadCaptionsURLsFromApi( data.objects, callback );
 
@@ -547,14 +584,18 @@
 				captionsSrc = mw.getConfig('Kaltura.ServiceUrl') +
 							"/api_v3/index.php/service/caption_captionasset/action/serveWebVTT/captionAssetId/" +
 							dbTextSource.id +
-							"/segmentIndex/-1/version/2/captions.vtt";
-				captionsSrc += ks ? '/ks/' + ks : '';
+							"/segmentIndex/-1/version/2";
+				captionsSrc += ks ? "/ks/" + ks + "/captions.vtt" : "/captions.vtt";
 			} else {
 				captionsSrc = this.getCaptionURL( dbTextSource.id ) + '/.' + dbTextSource.fileExt;
 			}
 
 			this.bind( 'onChangeMediaDone', function () {
 				_this.embedPlayer.getInterface().find( 'track').remove();
+				//display captions when media is changing without user interaction and displayCaptions is set to true
+				if (_this.isCaptionsShown) {
+					_this.setConfig('displayCaptions', true);
+				}
 			});
 
 			// Try to insert the track source:
@@ -608,7 +649,7 @@
 				if( defaultLangKey == 'None' ){
 					return ;
 				}
-				if ( mw.isIOS() && !mw.isIpad() && !mw.getConfig('EmbedPlayer.WebKitPlaysInline') ) {
+				if ( this.isNativeIOSPlayback() ) {
 					this.selectDefaultIosTrack(defaultLangKey);
 					return ;
 				}
@@ -623,7 +664,7 @@
             // Get source by "default" property
             if ( !this.selectedSource ) {
                 source = this.selectDefaultSource();
-	            if ( source && mw.isIOS() && !mw.isIpad() && !mw.getConfig('EmbedPlayer.WebKitPlaysInline') ) {
+	            if ( source && this.isNativeIOSPlayback() ) {
 		            this.selectDefaultIosTrack(source.srclang);
 		            return ;
 	            }
@@ -651,12 +692,20 @@
 		},
 		selectDefaultIosTrack: function (defaultLangKey) {
 			var _this = this;
-			this.once( 'playing', function (){
-				setTimeout(function () {
-					_this.log('selectDefaultIosTrack: ' + defaultLangKey);
-					_this.embedPlayer.selectDefaultCaption(defaultLangKey);
-				}, 500);
-			});
+			if (_this.embedPlayer.isPlaying()){
+				_this.selectTextTrack(defaultLangKey);
+			} else {
+				_this.once( 'playing', function (){
+					_this.selectTextTrack(defaultLangKey);
+				});
+			}
+		},
+		selectTextTrack: function(defaultLangKey) {
+			var _this = this;
+			this.selectTextTrackTimeoutId = setTimeout(function () {
+				_this.log('selectDefaultIosTrack: ' + defaultLangKey);
+				_this.embedPlayer.selectDefaultCaption(defaultLangKey);
+			}, 500);
 		},
 		selectSourceByLangKey: function( langKey ){
 			var _this = this;
@@ -875,7 +924,7 @@
 		},
 		updateBelowVideoCaptionContainer: function(){
 			var _this = this;
-			mw.log( "TimedText:: updateBelowVideoCaptionContainer" );
+			mw.log( "ClosedCaptions:: updateBelowVideoCaptionContainer" );
 			if (this.getConfig('displayCaptions') === false){
 				return;
 			}
@@ -900,7 +949,7 @@
 			this.updateLayoutEventFired = true;
 			 _this.embedPlayer.doUpdateLayout();
 			this.updateLayoutEventFired = false;
-		},
+        },
 		/**
 		 * Gets a text size percent relative to about 30 columns of text for 400
 		 * pixel wide player, at 100% text size.
@@ -976,7 +1025,7 @@
 		},
 		getDefaultCaptionCss: function(){
 			var style = {};
-			style["display"] = "inline";
+			style["display"] = "inline-block";
 			if (this.getConfig('bg')) {
 				style["background-color"] = mw.getHexColor(this.getConfig('bg'));
 			}
@@ -1068,7 +1117,7 @@
 			// Check if we even have textSources
 			if( sources == 0 ){
 				this.setConfig('displayCaptions', false);
-
+				this.isCaptionsShown = false;
 				if( this.getConfig('hideWhenEmpty') === true ) {
 					this.getBtn().hide();
 				}
@@ -1166,11 +1215,12 @@
 			this.setTextSource(src);
 			this.embedPlayer.triggerHelper( "selectClosedCaptions", [ src.label, src.srclang ] );
 			this.getActiveCaption();
+			this.getBtn().focus();
 		},
 		addOffButton: function() {
 			var _this = this;
 			this.getMenu().addItem({
-				'label': 'Off',
+				'label': gM('mwe-closedCaptions-off-button'),
 				'attributes': {
 					'class': "offBtn"
 				},
@@ -1185,6 +1235,10 @@
 			this.embedPlayer.triggerHelper("selectClosedCaptions", "Off");
 			this.embedPlayer.triggerHelper('changedClosedCaptions', {language: ""});
 			this.setConfig('displayCaptions', false);
+			this.isCaptionsShown = false;
+			//Set the index of 'off' to lastActiveCaption
+			this.lastActiveCaption = this.getMenu().$el.find('.active').index();
+			this.getBtn().focus();
 			// also update the cookie to "None"
 			this.getPlayer().setCookie( this.cookieName, 'None' );
 		},
@@ -1224,6 +1278,7 @@
 			if( !this.getConfig('displayCaptions') ){
 				_this.getActiveCaption();
 				this.setConfig('displayCaptions', true );
+				this.isCaptionsShown = true;
 			}
 			// Save to cookie
 			if( setCookie && this.getConfig('useCookie') ){
@@ -1247,7 +1302,7 @@
 		getComponent: function(){
 			var _this = this;
 			if( !this.$el ){
-				var $menu = $( '<ul />' ).addClass( 'dropdown-menu' );
+				var $menu = $( '<ul />' ).addClass( 'dropdown-menu' ).attr('aria-expanded', false);
 				var $button = $( '<button />' )
 								.addClass( 'btn icon-cc' )
 								.attr({
@@ -1256,8 +1311,18 @@
 									'aria-haspopup':'true'
 								})
 								.click( function(e){
-									if ( _this.getMenu().numOfChildren() > 0 ) {
-										_this.getMenu().toggle();
+									var menuEl = _this.getMenu();
+									if (menuEl.numOfChildren() > 0) {
+										menuEl.toggle();
+										if (menuEl.$el.hasClass('open')) {
+											menuEl.$el.attr('aria-expanded', true);
+											// move focus to the selected item if menu opened by keyboard
+											if (e.screenX === 0 && e.screenY === 0) {
+												menuEl.$el.find('.active a').focus();
+											}
+										} else {
+											menuEl.$el.attr('aria-expanded', false);
+										}
 									} else {
 										_this.getPlayer().triggerHelper( "showHideClosedCaptions" );
 									}
@@ -1283,6 +1348,10 @@
 			return this.getComponent().find('button');
 		},
 		destory: function(){
+			if (this.selectTextTrackTimeoutId) {
+                clearTimeout(this.selectTextTrackTimeoutId);
+                this.selectTextTrackTimeoutId = null;
+            }
 			this.playbackStarted = false;
 			// Empty existing text sources
 			this.textSources = [];

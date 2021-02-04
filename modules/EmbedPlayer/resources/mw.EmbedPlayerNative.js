@@ -105,7 +105,13 @@
 			}
 			$(this.getPlayerElement()).css('position', 'absolute');
 
-			if (this.inline) {
+            /* Change the position to 'Static' only if the in-use Browser is Edge
+            and the the embedding method is ThumbnailEmbed. */
+            if (mw.isEdge() && mw.getConfig('thumbEmbedOrigin')) {
+            	$(this.getPlayerElement()).css('position', 'static');
+            }
+
+            if (this.inline) {
 				$(this.getPlayerElement()).attr('playsinline', '');
 			}
 
@@ -119,6 +125,9 @@
                 this.bindOnceHelper('playerReady', function () {
                     _this.setVolume(0);
                 });
+              
+            } else if (mw.getConfig('autoMute') && mw.getConfig('autoPlay')) {
+                this.toggleMute( true );
             }
 
 			this.addBindings();
@@ -139,9 +148,9 @@
 				return false;
 			}
             if (!mw.getConfig('autoMute')) {
-                if (mw.isMobileDevice() || mw.isIpad()) {
+                if (mw.isMobileDevice() || mw.isIpad() || mw.isIpadOS()) {
                     return mw.getConfig('mobileAutoPlay');
-                } else if (mw.isDesktopSafari11() && mw.getConfig('autoPlay')) {
+                } else if ((mw.isDesktopSafariVersionGreaterThan(11) || mw.isChromeVersionGreaterThan(66) || mw.isFirefoxVersionGreaterThan(66)) && mw.getConfig('autoPlay')) {
                     if (typeof mw.getConfig('autoPlayFallbackToMute') !== 'boolean') {
                         mw.setConfig('autoPlayFallbackToMute', true);
                     }
@@ -158,8 +167,8 @@
                 unMuteEventTriggers.forEach(function (eventName) {
                     _this.bindHelper(eventName + _this.bindPostfix, function () {
                         if (_this.mobileAutoPlay) {
+                            _this.setVolume(1, null, (mw.isIOS() || mw.isIpadOS()));
                             _this.mobileAutoPlay = false;
-                            _this.setVolume(1, null, mw.isIOS());
                         }
                         unMuteEventTriggers.forEach(function (eventName) {
                             _this.unbindHelper(eventName + _this.bindPostfix);
@@ -168,14 +177,14 @@
                 });
             }
 
-            this.bindHelper('firstPlay' + this.bindPostfix, function () {
-                _this.parseTracks();
-            });
             this.bindHelper('switchAudioTrack' + this.bindPostfix, function (e, data) {
                 _this.switchAudioTrack(data.index);
             });
-            this.bindHelper('liveOnline' + this.bindPostfix, function () {
-                _this.load();
+            this.bindHelper('liveOffline' + this.bindPostfix, function () {
+	            this.bindOnceHelper('liveOnline' + this.bindPostfix, function () {
+		            this.log(' onLiveOnline:: move from offline to online, restart the playback');
+		            _this.load();
+	            });
             });
             this.bindHelper('changeEmbeddedTextTrack' + this.bindPostfix, function (e, data) {
                 _this.onSwitchTextTrack(e, data);
@@ -327,13 +336,13 @@
 		canAutoPlay: function () {
 			if ( mw.isMobileDevice() ) {
 				var playsinline = true;
-				if ( mw.isIphone() ) {
+				if ( mw.isIphone()) {
 					playsinline = this.inline;
 				}
-				return (this.mobileAutoPlay && playsinline) || this.mobilePlayed;
+				return ((this.mobileAutoPlay || this.isMuted()) && playsinline) || this.mobilePlayed;
 			}
 			return true;
-		},
+			},
 
 		/**
 		 * Post element javascript, binds event listeners and starts monitor
@@ -478,7 +487,7 @@
 			// some initial calls to prime the seek:
 			if ( ( vid.currentTime === 0 && callbackCount === 0 ) && vid.readyState === 0 ) { //load video again if not loaded yet (vid.readyState === 0)
 				// when seeking turn off preload none and issue a load call.
-				if(mw.isIpad()){
+				if(mw.isIpad()|| mw.isIOSAbove7()){
 					$(vid).attr('preload', 'auto')[0].load();
 				} else {
 					$(vid).attr('preload', 'auto');
@@ -559,7 +568,7 @@
 				this.log("setCurrentTime seekTime:" + time);
 				// Try to update the playerElement time:
 				try {
-					var vid = this.getPlayerElement();
+                    var vid = this.getPlayerElement();
 					vid.currentTime = this.currentSeekTargetTime;
 				} catch (e) {
 					this.log("Error: Could not set video tag seekTime");
@@ -653,7 +662,7 @@
 		 */
 		isTextTrackSelected: function (textTracks, defaultLangKey) {
 			for (var i=0; textTracks.length > i; i++) {
-				if (textTracks[i].mode === "showing" && textTracks[i].language === defaultLangKey) {
+				if (textTracks[i].mode === "showing" && (textTracks[i].language === defaultLangKey || textTracks[i].label === defaultLangKey)) {
 					return true;
 				}
 			}
@@ -669,11 +678,11 @@
 		 */
 		showDefaultTextTrack: function (textTracks, defaultLangKey) {
 			$.each( textTracks, function( inx, caption) {
-				caption.mode = "hidden";
+				caption.mode = "disabled";
 			});
 
 			for (var i = 0; i < textTracks.length; i++) {
-				if (textTracks[i].language === defaultLangKey) {
+				if (textTracks[i].language === defaultLangKey || textTracks[i].label === defaultLangKey) {
 					textTracks[i].mode = "showing";
 					// select the first match
 					return;
@@ -868,6 +877,9 @@
 						vid.play();
 					}else{
 						if ( !( _this.playlist && mw.isAndroid() ) ){
+							if (_this.seeking) {
+								_this.seeking = false;
+							}
 							_this.play();
 						}
 
@@ -987,7 +999,8 @@
                             if (playPromise !== undefined) {
                                 playPromise.then(function() {
                                     mw.log("play promise resolved");
-                                }).catch(function(error) {
+                                });
+                                playPromise["catch"](function(error) {
                                     mw.log("play promise rejected");
                                     //If play is rejected then return UI state to pause so user can take action
                                     _this.pause();
@@ -1106,6 +1119,9 @@
 			} else {
 				// Should not happen offten
 				this.playerElement.load();
+                if (this.currentTime > 0) {
+                    this.seek(this.currentTime);
+                }
 				if (callback) {
 					callback();
 				}
@@ -1298,9 +1314,13 @@
 			}
 
 			// Update the interface ( if paused )
-			if (!this.ignoreNextNativeEvent && this._propagateEvents && this.paused && ( mw.getConfig('EmbedPlayer.EnableIpadHTMLControls') === true )) {
-				this.parent_play();
-			} else {
+			var enableIpadHTMLControls = mw.isIpad() ?
+				( mw.getConfig('EmbedPlayer.EnableIpadHTMLControls') === true ) : true;
+
+			if (!this.ignoreNextNativeEvent && this._propagateEvents && this.paused && enableIpadHTMLControls) {
+					this.parent_play();
+			}
+			else {
 				// make sure the interface reflects the current play state if not calling parent_play()
 				this.playInterfaceUpdate();
 				this.absoluteStartPlayTime = new Date().getTime();
@@ -1323,6 +1343,14 @@
 		 */
 		_onloadedmetadata: function () {
 			this.getPlayerElement();
+			var _this = this;
+			if (this.firstPlay) {
+				this.bindOnceHelper('firstPlay' + this.bindPostfix, function () {
+					_this.parseTracks();
+				});
+			} else {
+				this.parseTracks();
+			}
 			// only update duration if we don't have one: ( some browsers give bad duration )
 			// like Android 4 default browser
 			if (!this.duration
@@ -1535,6 +1563,7 @@
 		},
 		parseTracks: function(){
 			var vid = this.getPlayerElement();
+            this.id3TrackAdded = false;
 			this.parseAudioTracks(vid, 0); //0 is for a setTimer counter. Try to catch audioTracks, give up after 5 seconds
 			this.parseTextTracks(vid, 0); //0 is for a setTimer counter. Try to catch textTracks, give up after 10 seconds
 		},
@@ -1545,25 +1574,35 @@
 					var textTracksData = {languages: []};
 					for (var i = 0; i < vid.textTracks.length; i++) {
 						var textTrack = vid.textTracks[i];
-						if (textTrack.kind === 'metadata') {
+						if (textTrack.kind === 'metadata' && !_this.id3TrackAdded) {
+                            _this.id3TrackAdded = true;
 							//add id3 tags support
 							_this.id3Tag(textTrack);
-						} else if (textTrack.kind === 'subtitles' || textTrack.kind === 'caption') {
+							//keep metadata tracks in hidden mode so their cues will still get updated
+							textTrack.mode = 'hidden';
+						} else if (textTrack.kind === 'subtitles' || textTrack.kind === 'captions') {
 							textTracksData.languages.push({
 								'kind': 'subtitle',
-								'language': textTrack.label,
-								'srclang': textTrack.label,
+								'language': textTrack.language,
+								'srclang': textTrack.language,
 								'label': textTrack.label,
 								'title': textTrack.label,
 								'id': textTrack.id,
+								'default': textTrack.mode === 'showing',
 								'index': i
 							});
+							textTrack.mode = 'disabled';
 						}
-						textTrack.mode = 'hidden';
 					}
 					if (textTracksData.languages.length) {
 						mw.log('EmbedPlayerNative:: ' + textTracksData.languages.length + ' subtitles were found: ', textTracksData.languages);
 						_this.triggerHelper('textTracksReceived', textTracksData);
+					} else {
+						//if no caption or subtitle text track were added keep on looking
+						//In live we keep on looking till we found 608/708 caption without a counter to limit
+                        if( (_this.isLive()) || (!_this.isLive() && (counter < 10)) ){
+                            _this.parseTextTracks(vid, ++counter);
+                        }
 					}
 				}else{
 					//try to catch textTracks.kind === "metadata, give up after 10 seconds
@@ -1577,17 +1616,11 @@
 			var _this = this;
 			metadataTrack.addEventListener("cuechange", function (evt) {
 				try {
-					var id3Tag;
-					if ( mw.isEdge() ){
-						//Get the data from the event + Unicode transform
-						var id3TagData = String.fromCharCode.apply(null, new Uint8Array(evt.currentTarget.cues[evt.currentTarget.cues.length - 1].data));
-						//Get the JSON substring
-						var id3TagString = id3TagData.substring(id3TagData.indexOf("{"), id3TagData.lastIndexOf("}")+1);
-						//Parse JSON
-						id3Tag = JSON.parse(id3TagString);
-					} else {
-						id3Tag = JSON.parse(this.activeCues[0].value.data);
+					if(!evt.currentTarget.activeCues.length){
+						return;
 					}
+					var activeCueData = evt.currentTarget.activeCues[evt.currentTarget.activeCues.length-1].value.data;
+					var id3Tag = JSON.parse(activeCueData);
 					_this.triggerHelper('onId3Tag', id3Tag);
 				}
 				catch (e) {
@@ -1663,7 +1696,7 @@
 		hideTextTrack: function(){
             var activeSubtitle = this.getActiveSubtitle();
             if (activeSubtitle && activeSubtitle.mode) {
-                activeSubtitle.mode = 'hidden';
+                activeSubtitle.mode = 'disabled';
                 this.log('onSwitchTextTrack disable subtitles');
             }
 		},
@@ -1684,7 +1717,7 @@
 			if (textTracks) {
 				for (var i = 0; i < textTracks.length; i++) {
 					var textTrack = textTracks[i];
-					if (textTrack.mode === 'showing' && (textTrack.kind === 'subtitles' || textTrack.kind === 'caption')) {
+					if (textTrack.mode === 'showing' && (textTrack.kind === 'subtitles' || textTrack.kind === 'captions')) {
 						return textTrack;
 					}
 				}
@@ -1704,6 +1737,14 @@
 			this.removeBindings();
 			clearTimeout(this.parseAudioTracksTimeout);
 			clearTimeout(this.parseTextTracksTimeout);
+		},
+
+		getStartTimeOfDvrWindow: function(){
+            if( this.isLive() && this.isDVR() && this.getPlayerElement().seekable.length > 0 ) {
+				return this.getPlayerElement().seekable.start(0);
+			} else {
+				return 0;
+			}
 		}
 	};
 })(mediaWiki, jQuery);

@@ -8,7 +8,7 @@
 	var userAgent = navigator.userAgent;
 
 	mw.isMobileDevice = function () {
-		return ( mw.isIphone() || mw.isIpod() || mw.isIpad() || mw.isAndroid() || mw.isWindowsPhone() || mw.getConfig("EmbedPlayer.ForceNativeComponent") === true || mw.getConfig("EmbedPlayer.SimulateMobile") === true )
+		return ( mw.isIphone() || mw.isIpod() || mw.isIpad() || mw.isIpadOS() || mw.isAndroid() || mw.isWindowsPhone() || mw.getConfig("EmbedPlayer.ForceNativeComponent") === true || mw.getConfig("EmbedPlayer.SimulateMobile") === true )
 	};
 	mw.isNativeApp = function () {
 		return mw.getConfig("EmbedPlayer.ForceNativeComponent");
@@ -40,6 +40,16 @@
 	mw.isDesktopSafari = function () {
 		return mw.isSafari() && !mw.isMobileDevice();
 	};
+    mw.isDesktopSafariVersionGreaterThan = function (version) {
+        var safariVersion = mw.getSafariVersion();
+        var safariMajorVersion = safariVersion[0];
+        return ( mw.isDesktopSafari() && safariMajorVersion >= version );
+    };
+    mw.isSafariVersionGreaterThan = function (version) {
+        var safariVersion = mw.getSafariVersion();
+        var safariMajorVersion = safariVersion[0];
+        return ( mw.isSafari() && safariMajorVersion >= version );
+    };
 	mw.isSafari = function () {
 		return (/safari/).test(userAgent.toLowerCase()) && !mw.isChrome() && !mw.isEdge();
 	};
@@ -72,7 +82,10 @@
 	mw.isIpad3 = function () {
 		return  /OS 3_/.test(userAgent) && mw.isIpad();
 	};
-	
+	mw.isIpadOS = function() {
+		return mw.isSafari() && !mw.isIphone() && !mw.isIpad() && mw.isTouchDevice();
+	};
+
 	// Note on those Android checks: Windows Phone browser has "Android" in its userAgent.
 	// https://msdn.microsoft.com/en-us/library/hh869301%28v=vs.85%29.aspx
 	// So the Android checks must make sure the string does not include "Windows".
@@ -99,7 +112,7 @@
 		return ( userAgent.indexOf('Android') != -1 && userAgent.indexOf('Windows') === -1);
 	};
 	mw.isAndroid4andUp = function () {
-		var androidUAStringRegEx = /Android ((\d+)(?:\.\d+){1,2})/;
+		var androidUAStringRegEx = /Android ((\d+)(?:\.\d+){0,2})/;
 		var res = androidUAStringRegEx.exec(userAgent);
 		if ( res == null ){
 			return false;
@@ -114,9 +127,21 @@
 	mw.isFirefox = function () {
 		return ( userAgent.indexOf('Firefox') != -1 );
 	};
+
+	mw.isFirefoxVersionGreaterThan = function (version) {
+		var fireFoxVersion = mw.getFireFoxVersion();
+		var fireFoxMajorVersion = fireFoxVersion[0];
+		return ( mw.isFirefox() && fireFoxMajorVersion >= version );
+	};
+
 	mw.isChrome = function () {
 		return ( userAgent.indexOf('Chrome') != -1 && !mw.isEdge() );
 	};
+    mw.isChromeVersionGreaterThan = function (version) {
+        var chromeVersion = mw.getChromeVersion();
+        var chromeMajorVersion = chromeVersion[0];
+		return ( mw.isChrome() && chromeMajorVersion >= version );
+    };
 	mw.isAndroidNativeBrowser = function () {
 		return (mw.isAndroid() && !mw.isFirefox() && !mw.isChrome());
 	};
@@ -193,7 +218,11 @@
 	};
 
 	mw.isIOSAbove7 = function () {
-		return mw.isIOS8() || mw.isIOS9() || mw.isIOS10() || mw.isIOS11();
+		return mw.isSafariVersionGreaterThan(8);
+	};
+
+	mw.isNativeIOSPlayback = function() {
+   		return mw.isIOS() && !mw.isIpad() && !mw.getConfig('EmbedPlayer.WebKitPlaysInline');
 	};
 
 	mw.isSilk = function () {
@@ -378,6 +407,40 @@
 		} catch (e) {
 		}
 		return '0,0,0';
+	};
+
+    /**
+     * get safari version parts
+     * @returns {Array}
+     */
+    mw.getSafariVersion = function(){
+        var versionParts = [0, 0, 0];
+        var version = userAgent.toLowerCase().match(/.*version\/([0-9\.]+)/);
+        if (version && version[1]){
+            versionParts = version[1].split(".");
+        }
+        return versionParts;
+    };
+    /**
+	 * get chrome version parts
+     * @returns {Array}
+     */
+	mw.getChromeVersion = function(){
+        var chromeVersionParts = [0, 0, 0, 0];
+		var chromeVersion = userAgent.match(/.*Chrome\/([0-9\.]+)/);
+        if (chromeVersion && chromeVersion[1]){
+            chromeVersionParts = chromeVersion[1].split(".");
+		}
+		return chromeVersionParts;
+	};
+
+	mw.getFireFoxVersion = function(){
+		var fireFoxVersionParts = [0, 0, 0, 0];
+		var fireFoxVersion = userAgent.match(/.*Firefox\/([0-9\.]+)/);
+		if (fireFoxVersion && fireFoxVersion[1]){
+			fireFoxVersionParts = fireFoxVersion[1].split(".");
+		}
+		return fireFoxVersionParts;
 	};
 
 })(window.mediaWiki);

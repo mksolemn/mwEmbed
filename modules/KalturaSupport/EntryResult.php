@@ -50,7 +50,7 @@ class EntryResult
             return $this->responseHeaders;
         }
         // else cache for cache key save time:
-        $saveTime = $this->cache->get($this->getCacheKey() + '_savetime');
+        $saveTime = $this->cache->get($this->getCacheKey() . '_savetime');
         if (!$saveTime) {
             $saveTime = time();
         }
@@ -88,7 +88,7 @@ class EntryResult
             // we never cache admin or ks users access so would never expose info that not defined across anonymous regional access.
             if ($this->isCachable()) {
                 $this->cache->set($this->getCacheKey(), serialize($this->entryResultObj));
-                $this->cache->set($this->getCacheKey() + '_savetime', time());
+                $this->cache->set($this->getCacheKey() . '_savetime', time());
             }
         }
         // check if we have errors on the entry
@@ -169,11 +169,16 @@ class EntryResult
                 $filter->idEqual = $this->request->getEntryId();
             }
 
+            $responseProfile = array(
+                "type" => 2,
+                "fields" => "userId,creatorId"
+            );
+
             if ($this->request->isEmbedServicesEnabled() && $this->request->isEmbedServicesRequest()) {
                 $filter->freeText = urlencode(json_encode($this->request->getEmbedServicesRequest()));
             }
 
-            $baseEntryIdx = $namedMultiRequest->addNamedRequest('meta', 'baseEntry', 'list', array('filter' => $filter));
+            $baseEntryIdx = $namedMultiRequest->addNamedRequest('meta', 'baseEntry', 'list', array('filter' => $filter, 'responseProfile' => $responseProfile));
             // Get entryId from the baseEntry request response
             $entryId = '{' . $baseEntryIdx . ':result:objects:0:id}';
 

@@ -78,9 +78,16 @@ body {
 	cursor: pointer;
 	text-shadow: 0px 0px 4px rgba(0, 0, 0, 0.6);
 }
+.sideBarContainerReminder:focus{
+	outline: 1px solid #66CCFF;
+}
 #sideBarContainerReminderContainer{
 	font-size: 32px;
 	color: rgb(255, 255, 255);
+	display: none;
+}
+#sideBarContainerReminderContainer:focus{
+	display: block;
 }
 @media all and  (max-width: 640px) {
 	#sideBarContainerReminderContainer{
@@ -102,21 +109,29 @@ body {
 	text-shadow: 0px 0px 10px #fff;
 }
 .sideBarContainerReminder.left{
-	left: -30%;
+	left: 0px;
+	text-decoration: none;
 	-webkit-transition: left 0.3s ease-in;
 	-moz-transition: left 0.3s ease-in;
 	-o-transition: left 0.3s ease-in;
 	-ms-transition: left 0.3s ease-in;
 	transition: left 0.3s ease-in;
 }
-.sideBarContainerReminder.left.open{
-	left: 0px;
+.sideBarContainerReminder.left:focus{
+	z-index: 1000;
+}
+.sideBarContainerReminder.left:focus #sideBarContainerReminderContainer,
+.sideBarContainerReminder.left.open #sideBarContainerReminderContainer,
+.sideBarContainerReminder.right:focus #sideBarContainerReminderContainer,
+.sideBarContainerReminder.right.open #sideBarContainerReminderContainer{
+	display: block;
 }
 .sideBarContainerReminder.left.shifted{
 	left: 30%;
 }
 .sideBarContainerReminder.right{
 	right: -30%;
+	text-decoration: none;
 	-webkit-transition: right 0.3s ease-in;
 	-moz-transition: right 0.3s ease-in;
 	-o-transition: right 0.3s ease-in;
@@ -160,7 +175,7 @@ body {
 	left: -30%;
 }
 .sideBarContainer.openBtn {
-	z-index: 1001;
+	z-index: 1000;
 }
 .sideBarContainer.left.openBtn{
 	left: 0;
@@ -651,6 +666,7 @@ body {
 .volumeControl .ui-slider-horizontal.slider:focus {
 	width: 5em;
 	margin-right: 10px;
+	outline: #65cdff solid 2px;
 }
 .volumeControl.noTransition .ui-slider-horizontal.slider{
 	-moz-transition: none ;
@@ -718,6 +734,7 @@ body {
 .volumeControl.open .sliderContainer {
 	display: block;
 	display: block;
+	z-index: 1001;
 }
 .volumeControl .ui-slider-vertical{
 	height: 69px;
@@ -1797,7 +1814,7 @@ background-image:  linear-gradient(45deg, rgba(255, 255, 255, 0.15) 25%, transpa
 	padding: 0 10px;
 }
 .semiTransparentBkg{
-    z-index: 10;
+    z-index: 1004;
 	/* IE9 SVG, needs conditional override of 'filter' to 'none' */
 	background: url(data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiA/Pgo8c3ZnIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgd2lkdGg9IjEwMCUiIGhlaWdodD0iMTAwJSIgdmlld0JveD0iMCAwIDEgMSIgcHJlc2VydmVBc3BlY3RSYXRpbz0ibm9uZSI+CiAgPGxpbmVhckdyYWRpZW50IGlkPSJncmFkLXVjZ2ctZ2VuZXJhdGVkIiBncmFkaWVudFVuaXRzPSJ1c2VyU3BhY2VPblVzZSIgeDE9IjAlIiB5MT0iMCUiIHgyPSIwJSIgeTI9IjEwMCUiPgogICAgPHN0b3Agb2Zmc2V0PSIwJSIgc3RvcC1jb2xvcj0iIzAwMDAwMCIgc3RvcC1vcGFjaXR5PSIwLjUiLz4KICAgIDxzdG9wIG9mZnNldD0iMTAwJSIgc3RvcC1jb2xvcj0iIzNlM2UzZSIgc3RvcC1vcGFjaXR5PSIwLjUiLz4KICA8L2xpbmVhckdyYWRpZW50PgogIDxyZWN0IHg9IjAiIHk9IjAiIHdpZHRoPSIxIiBoZWlnaHQ9IjEiIGZpbGw9InVybCgjZ3JhZC11Y2dnLWdlbmVyYXRlZCkiIC8+Cjwvc3ZnPg==);
 	background: -moz-linear-gradient(top,  rgba(0,0,0,0.5) 0%, rgba(62,62,62,0.5) 100%); /* FF3.6+ */
@@ -2019,7 +2036,7 @@ background-image:  linear-gradient(45deg, rgba(255, 255, 255, 0.15) 25%, transpa
     right : 2px;
     width: 50px !important;
     height: 50px !important;
-
+    z-index: 4;
 }
 .closePluginsScreen:active{
     outline: 0;

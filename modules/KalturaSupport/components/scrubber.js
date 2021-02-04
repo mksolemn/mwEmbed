@@ -45,7 +45,7 @@
 		addBindings: function () {
 			var _this = this;
 			this.bind('durationChange', function (event, duration) {
-                _this.duration = duration;
+                _this.duration = duration - _this.embedPlayer.getStartTimeOfDvrWindow();
 			});
             this.bind('seeked', function () {
                 _this.justSeeked = true;
@@ -290,9 +290,7 @@
 				return this.getConfig('thumbSlicesUrl');
 			}
 			var thumbReq = {
-				'partner_id': this.embedPlayer.kpartnerid,
-				'uiconf_id': this.embedPlayer.kuiconfid,
-				'entry_id': this.embedPlayer.kentryid,
+				'url': this.embedPlayer.evaluate('{mediaProxy.entry.thumbnailUrl}'),
 				'width': this.getConfig("thumbWidth"),
 				'vid_slices': this.getSliceCount(this.duration)
 			}
@@ -300,7 +298,7 @@
 				thumbReq[ 'ks' ] = this.getPlayer().getFlashvars('ks');
 			}
 			// else get thumb slices from helper:
-			return kWidget.getKalturaThumbUrl( thumbReq );
+			return kWidgetSupport.getKalturaThumbnailUrl( thumbReq );
 		},
 		showThumbnailPreview: function (data) {
 			var showOnlyTime = this.getConfig("showOnlyTime");
@@ -414,7 +412,7 @@
 				},
 				change: function (event, ui) {
 					alreadyChanged = true;
-					var seekTime = (ui.value / 1000) * embedPlayer.getDuration();
+					var seekTime = (ui.value / 1000) * _this.duration + _this.embedPlayer.getStartTimeOfDvrWindow();
 					// always update the title
 					_this.updateAttr(ui);
 					// Only run the onChange event if done by a user slide
@@ -436,8 +434,9 @@
 			var duration = isNaN(this.embedPlayer.getDuration()) ? 0 : this.embedPlayer.getDuration();
 			var attributes = {
 				'data-title': title,
-				'aria-label': gM( 'mwe-embedplayer-seek' ),
-				'aria-valuetext': title + " of " + totalDuration,
+				'tabindex': 1,
+				'aria-label': gM( 'mwe-embedplayer-seek'),
+				'aria-valuetext': title + " of " + totalDuration +', '+ gM( 'mwe-embedplayer-adjust-video-progress'),
 				'aria-valuenow': parseInt(perc * 100) + '%',
 				'aria-valuemax' : duration,
 				'aria-valuemin' : 0

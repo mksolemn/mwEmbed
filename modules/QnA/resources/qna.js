@@ -2,6 +2,8 @@
 
 (function (mw, $, ko) {
 	"use strict";
+	var NUM_OF_MAX_CHAR = 500;
+
 
 	mw.PluginManager.add('qna', mw.KBasePlugin.extend({
 
@@ -12,7 +14,8 @@
 			qnaFontsCssFileName: 'modules/QnA/resources/css/qna-fonts.css',
 			qnaNanoCssFileName: 'modules/QnA/resources/css/qna-nano.css',
 			qnaThreadsListCssFileName: 'modules/QnA/resources/css/qna-threads-list.css',
-			onPage: true
+			onPage: true,
+			overrideModeratorName: false
 		},
 
 		moduleStatus: ko.observable(undefined),
@@ -139,7 +142,8 @@
 				_this.getQnaContainer();
 				qnaObject = _this.getQnaContainer().find(".qnaModuleBackground");
 				onVideoTogglePluginButton = $('.qna-on-video-btn');
-
+                if ( _this.getConfig( 'onPage' ) ) {
+				
 				// register to on click to change the icon of the toggle button
                 onVideoTogglePluginButton.on("click", function(){
 
@@ -153,25 +157,43 @@
 					_this.getQnaContainer();
 					if (openQnaContainer){
 						qnaObject.show();
+						_this.getPlayer().sendNotification("qna", {visible:true} );
 					} else {
 						qnaObject.hide();
+						_this.getPlayer().sendNotification("qna", {visible:false} );
 					}
                     _this.changeVideoToggleIcon();
 				});
 
 				_this.updateUnreadBadge();
+
+                }
+                else {
+                    $('.qna-on-video-btn').remove();
+				}
 			});
 
 			this.bind('onOpenFullScreen', function() {
+				if(!qnaObject.is(":hidden")){
+					// Entring fullscreen will turn a flag to close it later
+					this.hideOnFullscreen = true;
+				}
                 qnaObject.hide();
+                _this.getPlayer().sendNotification("qna", {visible:false} );
 				_this.changeVideoToggleIcon();
 				if (!_this.getConfig( 'onPage' )) {
 					$( ".videoHolder, .mwPlayerContainer" ).css( "width", "100%" );	}
 			});
 			this.bind('onCloseFullScreen', function() {
+				if(this.hideOnFullscreen){
+					qnaObject.show();
+					_this.getPlayer().sendNotification("qna", {visible:true} );
+				}
+				this.hideOnFullscreen = false;
 				_this.changeVideoToggleIcon();
 				if (!_this.getConfig( 'onPage' )){
 					$(".videoHolder, .mwPlayerContainer").css("width", _this.originalPlayerWidth + "px");
+                    $(".qnaModuleBackground").css("display", "block");
 				}
 			});
 		},
@@ -229,17 +251,9 @@
 		getQnaContainer: function(){
 			var _this = this;
             var embedPlayer = this.getPlayer();
-			if (!this.$qnaListContainer) {
+			if (!this.$qnaListContainer && this.getPlayer().isLive()) {
 
-				// for unfriendly iFrames, where we can't access window['parent'] we set on page to false
-				if ( this.getConfig( 'onPage' ) ) {
-					try{
-						var parent = window['parent'].document;
-					}catch(e){
-						this.setConfig('onPage', false);
-						mw.log("cant access window['parent'] - setting to false");
-					}
-				}
+				this.markIfCanAccessToIframesParent();
 
 				if ( this.getConfig( 'onPage' ) ) {
 					// Inject external CSS files
@@ -249,15 +263,8 @@
 					this.injectCssToPage(this.getConfig('qnaThreadsListCssFileName'));
 					this.injectCssToPage(this.getConfig('qnaMainCssFileName')); //should be last, since we we it to test css was loaded
 
-					try{
-						var iframeParent = $('#'+this.embedPlayer.id, window['parent'].document)[0];
-						$(iframeParent).parents().find("#" + this.getConfig('qnaTargetId')).html("<div class='qnaInterface'></div>");
-						this.$qnaListContainer = $(iframeParent).parents().find(".qnaInterface");
-					}catch(e){
-						mw.log("failed to access window['parent'] for creating $qnaListContainer");
-					}
-				}
-				else{
+					this.getQnaInterfaceInsideIframe();
+				} else {
 					// wrap the .mwPlayerContainer element with our qnaInterface div
 					var floatDirection = this.getConfig( 'containerPosition' ) ? this.getConfig( 'containerPosition' ) : "right";
 					var qnaInterfaceElementText = "<div class='qnaInterface' style='position: relative; width: " + this.getConfig( 'moduleWidth' ) + "px; height: 100%; float:" + floatDirection + "'>";
@@ -295,14 +302,50 @@
 						_this.KQnaModule.applyLayout();
 					});
 				}else{ // for in player plugin don't wait for css to load
-					_this.KQnaService = new mw.KQnaService(embedPlayer, _this);
-					_this.KQnaModule = new mw.KQnaModule(embedPlayer, _this, _this.KQnaService);
-					ko.applyBindings(_this.KQnaModule, _this.$qnaListContainer[0]);
-					_this.KQnaModule.applyLayout();
+                    _this.KQnaService = new mw.KQnaService(embedPlayer, _this);
+                    _this.KQnaModule = new mw.KQnaModule(embedPlayer, _this, _this.KQnaService);
+                    ko.applyBindings(_this.KQnaModule, _this.$qnaListContainer[0]);
+                    _this.KQnaModule.applyLayout();
+                }
+			}
+            else if ( !this.getPlayer().isLive() ) {
+				this.markIfCanAccessToIframesParent();
+
+				if ( this.getConfig( 'onPage' ) ) {
+					this.getQnaInterfaceInsideIframe();
+				} else {
+					this.$qnaListContainer = $(".qnaInterface");
+				}
+            }
+
+            return this.$qnaListContainer;
+		},
+
+		markIfCanAccessToIframesParent: function() {
+			// for unfriendly iFrames, where we can't access window['parent'] we set on page to false
+			if ( this.getConfig( 'onPage' ) ) {
+				try {
+					var parent = window['parent'].document;
+				} catch(e) {
+					this.setConfig('onPage', false);
+					mw.log("cant access window['parent'] - setting to false");
+				}
+			}
+		},
+
+		getQnaInterfaceInsideIframe: function() {
+			try {
+				var iframeParent = $('#'+this.embedPlayer.id, window['parent'].document)[0];
+				this.$qnaListContainer = $(iframeParent).parents().find(".qnaInterface");
+
+				if (!this.$qnaListContainer.length){
+					$(iframeParent).parents().find("#" + this.getConfig('qnaTargetId')).html("<div class='qnaInterface'></div>");
+					this.$qnaListContainer = $(iframeParent).parents().find(".qnaInterface");
 				}
 
+			} catch(e){
+				mw.log("failed to access window['parent'] for creating $qnaListContainer");
 			}
-			return this.$qnaListContainer;
 		},
 
 		positionQAButtonOnVideoContainer : function(){
@@ -340,10 +383,16 @@
 
 		submitQuestion : function(){
 			var _this = this;
-			var textArea = _this.getQnaContainer().find('.qnaQuestionTextArea');
+			var qnaContainer$ = _this.getQnaContainer();
+			var textArea = qnaContainer$.find('.qnaQuestionTextArea');
 			var question = textArea.val();
+            var questionCharCounter = qnaContainer$.find('.qnaQuestionCharCounter');
 
-			// protection from empty string
+            if (!question) {
+                mw.log("question is not defined");
+			}
+
+            // protection from empty string
 			if (!(/\S/.test(question))){
 				return false;
 			}
@@ -353,7 +402,7 @@
 			} else {
 				if (question !== gM('qna-default-question-box-text')) {
 					_this.KQnaService.submitQuestion(question);
-					_this.resetTextArea(textArea);
+					_this.resetTextArea(textArea, questionCharCounter);
 					return true;
 				}
 			}
@@ -364,28 +413,22 @@
 			var _this = this;
 			var sendButton = _this.getQnaContainer().find('.qnaSendButton');
 			var textArea = _this.getQnaContainer().find('.qnaQuestionTextArea');
+			var questionCharCounter = _this.getQnaContainer().find('.qnaQuestionCharCounter');
 			sendButton.text(gM('qna-send-button-text'));
 			sendButton
 				.off('click')
 				.on('click', function(){
 					_this.submitQuestion();
 				});
-			var cancelButton = _this.getQnaContainer().find('.qnaCancelButton');
-			cancelButton.text(gM('qna-cancel-button-text'));
-			cancelButton
-				.off('click')
-				.on('click', function(){
-					_this.resetTextArea(textArea);
-				});
 
-			_this.resetTextArea(textArea);
+			_this.resetTextArea(textArea, questionCharCounter);
 			textArea
 				.off('focus')
 				.on('focus', function(){
 					if (textArea.val() === gM('qna-default-question-box-text')) {
 						textArea.val('');
-						textArea.removeClass("qnaInterface qnaQuestionTextAreaNotTyping");
-						textArea.addClass("qnaInterface qnaQuestionTextAreaTyping");
+						textArea.removeClass("qnaQuestionTextAreaNotTyping");
+						textArea.addClass("qnaQuestionTextAreaTyping");
 					}
 				});
 
@@ -393,7 +436,7 @@
 				.off('blur')
 				.on('blur', function(){
 					if (textArea.val() === '') {
-						_this.resetTextArea(textArea);
+						_this.resetTextArea(textArea, questionCharCounter);
 					}
 				});
 
@@ -405,7 +448,30 @@
 					}
 					e.preventDefault();
 				}
+				else {
+                    countNumOfChars(this);
+				}
+
+				return true;
 			});
+
+            textArea.keyup(function() {
+                countNumOfChars(this);
+                return true;
+            });
+
+            textArea.on('paste cut',function(e) {
+            	var _this = this;
+            	setTimeout(function() {
+                    countNumOfChars(_this);
+                });
+            });
+
+            function countNumOfChars(element) {
+                var qCharText = $(element).val();
+                var counterText = qCharText.length + '/' + NUM_OF_MAX_CHAR;
+                questionCharCounter.text(counterText);
+            }
 
 			textArea.bind("mousewheel",function(ev) {
 				ev.preventDefault();
@@ -421,10 +487,14 @@
 			});
 		},
 
-		resetTextArea : function(textArea){
+		resetTextArea : function(textArea, textCounter){
 			textArea.val(gM('qna-default-question-box-text'));
-			textArea.removeClass("qnaInterface qnaQuestionTextAreaTyping");
-			textArea.addClass("qnaInterface qnaQuestionTextAreaNotTyping");
+			textArea.removeClass("qnaQuestionTextAreaTyping");
+			textArea.addClass("qnaQuestionTextAreaNotTyping");
+
+			if (textCounter) {
+                textCounter.text('0/' + NUM_OF_MAX_CHAR);
+			}
 		},
 
 		getHTML : function(){
@@ -455,12 +525,11 @@
 				if (!_this.getConfig( 'onPage' )) {
 					_this.getQnaContainer().find(".qnaModuleBackgroundHider").hide();
 				}
-
 				// open the module only if this is the first time
 				if (firstTime) {
 					_this.getQnaContainer().find(".qnaModuleBackground").show();
+					_this.getPlayer().sendNotification("qna", {visible:true,firstTime:true} );
 				}
-
 				if (announcementOnly){
 					_this.getQnaContainer().find(".qnaQuestionArea").hide();
 					$('.qnaReplyBox').hide();

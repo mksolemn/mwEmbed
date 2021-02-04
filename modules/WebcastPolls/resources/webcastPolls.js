@@ -283,19 +283,21 @@
 						            _this.pollData.pollResults.totalVoters = cuepointContent.totalVoters;
 						            _this.view.syncDOMPollResults();
 					            }
-
-				            }
+                                // make sure we process poll-results cuepoint 
+                                var newContext = _this.cuePointsManager._createReachedCuePointsArgs([cuepoint] , {} );
+                                _this.handlePollResultsCuePoints({cuepointsArgs : newContext});
+                            }
 				            if (cuepointContent && pollId) {
 					            var pollContent = cuepointContent.text;
 					            if (pollId && pollContent) {
 						            _this.log("updated content of poll with id '" + pollId + "'");
 						            if(_this.globals.pollsContentMapping[pollId]) {
-							            $.extend(_this.globals.pollsContentMapping[pollId], pollContent);
+                                        $.extend(_this.globals.pollsContentMapping[pollId], pollContent);
 						            }else{
-							            _this.globals.pollsContentMapping[pollId] = pollContent;
+                                        _this.globals.pollsContentMapping[pollId] = pollContent;
 						            }
 					            }
-				            }
+                            }
 
 			            }catch(e){
 				            _this.log("ERROR while tring to extract poll information with error " + e);
@@ -393,12 +395,12 @@
                 var stateCuePointToHandle = _this.filterStateCuePoints(cuepointsArgs);
                 if (stateCuePointToHandle) {
                     try {
-                        var showingAPoll = stateCuePointToHandle.tags.indexOf('select-poll-state') > -1;
+                        var showingAPollState = stateCuePointToHandle.tags.indexOf('select-poll-state') > -1;
+                        var pollState = JSON.parse(stateCuePointToHandle.partnerData);
+                        var isLocalAssetChange = pollState && pollState.params && pollState.params.isLocalAssetChange === true;
 
-                        if (showingAPoll) {
+                        if (showingAPollState && !isLocalAssetChange) {
                             _this.log("got state update for current poll  - syncing current poll with state '" + stateCuePointToHandle.partnerData + "'");
-
-                            var pollState = JSON.parse(stateCuePointToHandle.partnerData);
                             if(pollState.status == "inProgress" && _this.embedPlayer.isDVR()){
                                 //in DVR mode check if this poll was ended by the moderator
                                 var pollId = pollState.pollId;

@@ -30,7 +30,6 @@
                     }];
 
                     _this.getKClient().doRequest(getQuizuserEntryIdAndQuizParams, function (data) {
-
                         callback(data);
                     });
                 };
@@ -53,10 +52,10 @@
                     }];
 
                     _this.getKClient().doRequest(getCp, function (data) {
-
                         callback(data);
                     });
                 };
+
 
                 this.createQuizUserEntryId = function(callback){
 
@@ -72,8 +71,7 @@
                     });
 
                 };
-                this.addAnswer = function(isAnswered,selectedAnswer,kQuizUserEntryId,questionNr,callback){
-
+                this.addAnswer = function(isAnswered,selectedAnswer,kQuizUserEntryId,questionNr,callback,openQuestionText){
                     var _this = this,answerParams = {};
                     var quizSetAnswer = {
                         'service': 'cuepoint_cuepoint',
@@ -95,6 +93,10 @@
                             'cuePoint:parentId': $.cpObject.cpArray[questionNr].cpId,
                             'cuePoint:startTime': '0'
                         };
+                    }
+                    if(openQuestionText){
+                        quizSetAnswer["cuePoint:openAnswer"] = openQuestionText;
+                        quizSetAnswer["cuePoint:answerKey"] = 1;
                     }
 
                     $.extend(quizSetAnswer, answerParams);
@@ -129,6 +131,9 @@
                         callback(data);
                     });
                 };
+            },
+            retake: function (callback){
+                this.createQuizUserEntryId(callback);
             },
             destroy: function () {
 

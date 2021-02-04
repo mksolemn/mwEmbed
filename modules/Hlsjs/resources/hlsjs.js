@@ -28,7 +28,7 @@
 			/** @type {Number} */
 			mediaErrorRecoveryCounter: 0,
 			playerErrorRecoveryCounter: 0,
-
+			localSingleFlavor : null,
 			debugInfoInterval: 4,
 			debugInfoCounter: 0,
 
@@ -44,9 +44,8 @@
 			afterInitialSeeking: false,
 			/** type {Number} */
 			levelIndex: -1,
-
-			/** type {Object} */
-			ptsID3Data: {},
+			/** type {booleab} */
+			liveOffline: false,
 
 			/**
 			 * Check is HLS is supported
@@ -71,6 +70,7 @@
 				this.bind("playerReady", this.initHls.bind(this));
 				this.bind("onChangeMedia", this.clean.bind(this));
 				this.bind("liveOnline", this.onLiveOnline.bind(this));
+				this.bind("liveOffline", this.onLiveOffline.bind(this));
 				if (mw.getConfig("hlsLogs")) {
 					this.bind("monitorEvent", this.monitorDebugInfo.bind(this));
 				}
@@ -81,6 +81,7 @@
 			isNeeded: function () {
 				if (this.getPlayer().mediaElement.selectedSource.mimeType === "application/vnd.apple.mpegurl") {
 					this.LoadHLS = true;
+					this.embedPlayer.streamerType = 'hls';
 				} else {
 					this.LoadHLS = false;
 				}
@@ -91,6 +92,7 @@
 			clean: function () {
 				this.log("Clean");
 				if (this.LoadHLS && this.loaded) {
+					this.localSingleFlavor = null;
 					this.LoadHLS = false;
 					this.loaded = false;
 					this.unRegisterHlsEvents();
@@ -100,13 +102,14 @@
 					this.mediaAttached = false;
 					this.hls.destroy();
 					this.hls = null;
+					this.liveOffline = false;
 				}
             },
 			/**
 			 * Register the playback events and attach the playback engine to the video element
 			 */
 			initHls: function () {
-				if (this.LoadHLS && !this.loaded) {
+				if (this.LoadHLS && !this.loaded && !this.embedPlayer.casting) {
 					this.log("Init");
 					//Set streamerType to hls
 					this.embedPlayer.streamerType = 'hls';
@@ -128,6 +131,11 @@
 					$(this.getPlayer().getPlayerElement()).one("canplay", function(){
 						// The initial seeking to the live edge has finished.
 						this.afterInitialSeeking = true;
+						if (this.embedPlayer.isLive() && !this.embedPlayer.isDVR() && (mw.isIE11() || mw.isEdge())) {
+							var player = this.embedPlayer.getPlayerElement();
+							//nudge time on IE11 live streams due to audio bug https://github.com/video-dev/hls.js/issues/2323
+							player.currentTime = player.currentTime + 0.1;
+						}
 					}.bind(this));
                     this.bind("onLiveOffSynchChanged", this.onLiveOffSyncChanged.bind(this));
                     this.bind("seeking", this.onSeekBeforePlay.bind(this));
@@ -140,7 +148,8 @@
 			},
 			getHlsConfig: function(){
 				var defaultConfig = {
-					//debug:true
+					// debug:true,
+                    maxMaxBufferLength: 60,
 					liveSyncDurationCount: 3,
 					liveMaxLatencyDurationCount: 6
 				};
@@ -177,8 +186,6 @@
 				this.hls.on(Hls.Events.FRAG_LOADING, this.onFragLoadingHandler);
 				this.onFragLoadedHandler = this.onFragLoaded.bind(this);
 				this.hls.on(Hls.Events.FRAG_LOADED, this.onFragLoadedHandler);
-				this.onFragParsingMetadataHandler = this.onFragParsingMetadata.bind(this);
-				this.hls.on(Hls.Events.FRAG_PARSING_METADATA, this.onFragParsingMetadataHandler);
 				this.onFragParsingDataHandler = this.onFragParsingData.bind(this);
 				this.hls.on(Hls.Events.FRAG_PARSING_DATA, this.onFragParsingDataHandler);
 				this.onPTSUpdatedHandler = this.onPTSUpdated.bind(this);
@@ -186,7 +193,7 @@
 				this.onFragBufferedHandler = this.onFragBuffered.bind(this);
 				this.hls.on(Hls.Events.FRAG_BUFFERED, this.onFragBufferedHandler);
 				this.onLevelSwitchHandler = this.onLevelSwitch.bind(this);
-				this.hls.on(Hls.Events.LEVEL_SWITCH, this.onLevelSwitchHandler);
+				this.hls.on(Hls.Events.LEVEL_SWITCHED, this.onLevelSwitchHandler);
 				this.onFragChangedHandler = this.onFragChanged.bind(this);
 				this.hls.on(Hls.Events.FRAG_CHANGED, this.onFragChangedHandler);
 				this.onErrorHandler = this.onError.bind(this);
@@ -208,15 +215,13 @@
 				this.onFragLoadingHandler = null;
 				this.hls.off(Hls.Events.FRAG_LOADED, this.onFragLoadedHandler);
 				this.onFragLoadedHandler = null;
-				this.hls.off(Hls.Events.FRAG_PARSING_METADATA, this.onFragParsingMetadataHandler);
-				this.onFragParsingMetadataHandler = null;
 				this.hls.off(Hls.Events.FRAG_PARSING_DATA, this.onFragParsingDataHandler);
 				this.onFragParsingDataHandler = null;
 				this.hls.off(Hls.Events.LEVEL_PTS_UPDATED, this.onPTSUpdatedHandler);
 				this.onPTSUpdatedHandler = null;
 				this.hls.off(Hls.Events.FRAG_BUFFERED, this.onFragBufferedHandler);
 				this.onFragBufferedHandler = null;
-				this.hls.off(Hls.Events.LEVEL_SWITCH, this.onLevelSwitchHandler);
+				this.hls.off(Hls.Events.LEVEL_SWITCHED, this.onLevelSwitchHandler);
 				this.onLevelSwitchHandler = null;
 				this.hls.off(Hls.Events.FRAG_CHANGED, this.onFragChangedHandler);
 				this.onFragChangedHandler = null;
@@ -235,8 +240,11 @@
 				this.mediaAttached = true;
 				var selectedSource = this.getPlayer().getSrc();
 				if (selectedSource) {
-					this.getPlayer().resolveSrcURL(selectedSource).then(
-						function (source) {
+						this.getPlayer().resolveSrcURL(selectedSource).then(
+						function (source,flavor) {
+							if(flavor){
+								this.localSingleFlavor = flavor;
+							}
 							this.hls.loadSource(source);
 						}.bind(this),
 						function () { //error
@@ -253,27 +261,13 @@
 				//data: { frag : fragment object}
 				this.getPlayer().triggerHelper('hlsFragLoading', data.frag.url);
 				//mw.log("hlsjs :: onFragLoading | url = "+data.frag.url);
-
 			},
 			onFragLoaded: function (e, data) {
 				//fired when a fragment loading is completed
 				//data: { frag : fragment object, payload : fragment payload, stats : { trequest, tfirst, tload, length}}
 				this.getPlayer().triggerHelper('hlsFragLoaded', data.frag.url);
 				//mw.log("hlsjs :: onFragLoaded | url = "+data.frag.url);
-
-			},
-			onFragParsingMetadata: function (e, data) {
-				//data: { samples : [ id3 pes - pts and dts timestamp are relative, values are in seconds]}
-				data.samples.forEach(function(sample){
-					//Get the data from the event + Unicode transform
-					var sampleData = String.fromCharCode.apply(null, new Uint8Array(sample.data));
-					//Get the JSON substring
-					var sampleString = sampleData.substring(sampleData.indexOf("{"), sampleData.lastIndexOf("}") + 1);
-					//Parse JSON
-					var id3Tag = JSON.parse(sampleString);
-					//store ID3 data, use rounded pts value
-					this.ptsID3Data[Math.round(sample.pts)] = id3Tag;
-				}.bind(this));
+				this.getPlayer().triggerHelper('hlsFragLoadedWithStats',data);
 			},
 			onFragParsingData: function (e, data) {
 				//fired when moof/mdat have been extracted from fragment
@@ -296,6 +290,7 @@
 				//data: { frag : fragment object, stats : { trequest, tfirst, tload, tparsed, tbuffered, length} }
 				this.getPlayer().triggerHelper('hlsFragBuffered', data.frag.url);
 				//mw.log("hlsjs :: onFragBuffered | url = "+data.frag.url);
+				this.getPlayer().triggerHelper('hlsFragBufferedWithData', data);
 			},
 			onDropFrames: function (e, data) {
 				//triggered when FPS drop in last monitoring period is higher than given threshold
@@ -318,15 +313,23 @@
             /**
              * manifest loaded handler.
              */
-            onManifestLoaded: function () {
-                //HLS.JS by default sets showing to text track for default HLS manifest text track
-				//we want to handle it on ourselves so always set it to hidden after hls.js makes its decision
-            	this.log("manifest loaded");
-                var vid = this.getPlayer().getPlayerElement();
-                var textTracks = vid.textTracks;
-                for (var i=0; i < textTracks.length; i++){
-                	textTracks[i].mode = "hidden";
+            onManifestLoaded: function (event,data) {
+                this.log("manifest loaded");
+                if (!this.embedPlayer.isLive()){
+                    this.hls.startLoad(this.getPlayer().currentTime);
                 }
+                //HLS.JS by default sets showing to text track for default HLS manifest text track
+                //we want to handle it on ourselves so always set it to hidden after hls.js makes its decision
+                this.log("manifest loaded");
+                //we want to handle it on ourselves so always set it to hidden after hls.js makes its decision
+                if (!this.embedPlayer.getKalturaConfig('closedCaptions', 'showEmbeddedCaptions')) {
+		            var vid = this.getPlayer().getPlayerElement();
+		            var textTracks = vid.textTracks;
+		            for (var i=0; i < textTracks.length; i++){
+			            textTracks[i].mode = "disabled";
+		            }
+	            }
+	            this.getPlayer().triggerHelper('hlsManifestLoadedWithStats',data);
             },
 			/**
 			 * Extract available audio tracks metadata from parsed manifest data
@@ -337,20 +340,19 @@
 				var audioTracks = this.hls.audioTracks;
 				if (audioTracks && audioTracks.length > 0) {
 					var audioTrackData = {languages: []};
-					var audioTrackLangs = {};
+					var createAudioTrack = function(index, audioTrack) {
+						return {
+							'kind': 'audioTrack',
+							'language': audioTrack.lang,
+							'srclang': audioTrack.lang,
+							'label': audioTrack.name,
+							'title': audioTrack.name,
+							'id': audioTrack.id,
+							'index': index
+						};
+					};
 					$.each(audioTracks, function (index, audioTrack) {
-						if (audioTrackLangs[audioTrack.lang] === undefined) {
-							audioTrackLangs[audioTrack.lang] = 1;
-							audioTrackData.languages.push({
-								'kind': 'audioTrack',
-								'language': audioTrack.lang,
-								'srclang': audioTrack.lang,
-								'label': audioTrack.name,
-								'title': audioTrack.name,
-								'id': audioTrack.id,
-								'index': audioTrackData.languages.length
-							});
-						}
+						audioTrackData.languages.push(createAudioTrack(index, audioTrack));
 					});
 					this.log(audioTracks.length + " audio tracks were found: " + JSON.stringify(audioTracks));
 					//Set default audio track
@@ -389,6 +391,12 @@
 			onLevelSwitch: function (event, data) {
 				//Set and report bitrate change
 				var source = this.hls.levels[data.level];
+				if(!source.bitrate && this.localSingleFlavor){
+					source.bitrate = this.localSingleFlavor.bitrate;
+					source.ext = this.localSingleFlavor.ext;
+					source.width = this.localSingleFlavor.width;
+					source.height = this.localSingleFlavor.height;
+				}
 				var currentBitrate = Math.round(source.bitrate / 1024);
 				var previousBitrate = this.getPlayer().currentBitrate;
 				this.getPlayer().currentBitrate = currentBitrate;
@@ -449,7 +457,7 @@
 			onError: function (event, data) {
 				this.log("Error: " + data.type + ", " + data.details);
 				//TODO: Need to decide when we dispatch player bug to be shown to viewer
-				if (this.mediaErrorRecoveryCounter > this.getConfig("maxErrorRetryCount")){
+				if ((this.mediaErrorRecoveryCounter > this.getConfig("maxErrorRetryCount")) && data.fatal){
 					this.handleUnRecoverableError(data);
 					return;
 				}
@@ -536,22 +544,35 @@
 					this.log("Try flash fallback");
 					this.fallbackToFlash();
 				} else {
+					var headers;
+					try {
+						if (data && data.networkDetails) {
+							headers = data.networkDetails.getAllResponseHeaders();
+						}
+					} catch (e) {
+						this.log("unable to get response headers");
+					}
 					try {
 						var dataObj = {
 							type: data.type,
 							details: data.details,
+							url: data.url || (data.frag && data.frag.url) || (data.context && data.context.url),
 							fatal: data.fatal,
 							response: data.response,
-							networkDetails: data.networkDetails
+							networkDetails: data.networkDetails,
+							headers: headers
 						};
 						var errorObj = {
 							message: JSON.stringify(dataObj),
 							// hls fatal error code could be either Network Error (1000) or Media Errors (3000)
 							code: data.type === "networkError" ? "1000" : "3000"
 						};
+						errorObj.key = errorObj.code;
+						this.log("error: " + JSON.stringify(errorObj));
 						this.getPlayer().triggerHelper('embedPlayerError', errorObj);
 					}
 					catch (e) {
+						this.log("error: failed to create error data object" + JSON.stringify(e));
 						this.getPlayer().triggerHelper('embedPlayerError', {
 							message: "hlsjs error"
 						});
@@ -595,6 +616,13 @@
 							'data-assetid': index
 						};
 					});
+
+					if(flavors.length === 1 && !flavors[0]["data-bandwidth"] && this.localBitrate  ){
+						flavors[0]["data-bandwidth"] = this.localBitrate * 1024;
+						flavors[0]["data-height"] = this.localBitrate.height;
+						flavors[0]["data-width"] = this.localBitrate.width;
+					}
+
 					this.getPlayer().setKDPAttribute('sourceSelector', 'visible', true);
 					this.getPlayer().onFlavorsListChanged(flavors);
 				}
@@ -603,13 +631,14 @@
 			 * Enable override player methods for HLS playback
 			 */
 			overridePlayerMethods: function () {
+				// storing original methods
 				this.orig_backToLive = this.getPlayer().backToLive;
+				this.orig_getStartTimeOfDvrWindow = this.getPlayer().getStartTimeOfDvrWindow;
 				this.orig_switchSrc = this.getPlayer().switchSrc;
 				this.orig_playerSwitchSource = this.getPlayer().playerSwitchSource;
 				this.orig_switchAudioTrack = this.getPlayer().switchAudioTrack;
 				this.orig_load = this.getPlayer().load;
 				this.orig_onerror = this.getPlayer()._onerror;
-				this.orig_ontimeupdate = this.getPlayer()._ontimeupdate;
 				this.orig_clean = this.getPlayer().clean;
 				if (this.getPlayer()._onseeking) {
 					this.orig_onseeking = this.getPlayer()._onseeking.bind(this.getPlayer());
@@ -617,31 +646,35 @@
 				if (this.getPlayer()._onseeked) {
 					this.orig_onseeked = this.getPlayer()._onseeked.bind(this.getPlayer());
 				}
+				this.orig_getTargetBuffer = this.getPlayer().getTargetBuffer;
+				//overriding with HLS.js methods
 				this.getPlayer().backToLive = this.backToLive.bind(this);
+				this.getPlayer().getStartTimeOfDvrWindow = this.getStartTimeOfDvrWindow.bind(this);
 				this.getPlayer().switchSrc = this.switchSrc.bind(this);
 				this.getPlayer().playerSwitchSource = this.playerSwitchSource.bind(this);
 				this.getPlayer().switchAudioTrack = this.switchAudioTrack.bind(this);
 				this.getPlayer().load = this.load.bind(this);
 				this.getPlayer()._onerror = this._onerror.bind(this);
-				this.getPlayer()._ontimeupdate = this._ontimeupdate.bind(this);
 				this.getPlayer()._onseeking = this._onseeking.bind(this);
 				this.getPlayer()._onseeked = this._onseeked.bind(this);
 				this.getPlayer().clean = this.clean.bind(this);
+				this.getPlayer().getTargetBuffer = this.getTargetBuffer.bind(this);
 			},
 			/**
 			 * Disable override player methods for HLS playback
 			 */
 			restorePlayerMethods: function () {
 				this.getPlayer().backToLive = this.orig_backToLive;
+				this.getPlayer().getStartTimeOfDvrWindow = this.orig_getStartTimeOfDvrWindow;
 				this.getPlayer().switchSrc = this.orig_switchSrc;
 				this.getPlayer().playerSwitchSource = this.orig_playerSwitchSource;
 				this.getPlayer().switchAudioTrack = this.orig_switchAudioTrack;
 				this.getPlayer().load = this.orig_load;
 				this.getPlayer()._onerror = this.orig_onerror;
-				this.getPlayer()._ontimeupdate = this.orig_ontimeupdate;
 				this.getPlayer()._onseeking = this.orig_onseeking;
 				this.getPlayer()._onseeked = this.orig_onseeked;
 				this.getPlayer().clean = this.orig_clean;
+				this.getPlayer().getTargetBuffer = this.orig_getTargetBuffer;
 			},
 			//Overidable player methods, "this" is bound to HLS plugin instance!
 			/**
@@ -678,7 +711,7 @@
 					if (status) { // going to offSync - liveMaxLatencyDurationCount should be infinity
 						this.hls.config.liveMaxLatencyDurationCount = Hls.DefaultConfig["liveMaxLatencyDurationCount"];
 					} else { // back to live - restore the default as it configured in the defaultConfig
-						this.hls.config.liveMaxLatencyDurationCount = this.defaultLiveMaxLatencyDurationCount;
+						this.hls.config.liveMaxLatencyDurationCount = this.defaultLiveMaxLatencyDurationCount || this.hls.config.liveMaxLatencyDurationCount;
 					}
 				}
 			},
@@ -704,7 +737,7 @@
                         if (this.hls.levels && (sourceIndex < this.hls.levels.length)){
                             this.levelIndex = sourceIndex;
                             if (!(this.hls.autoLevelEnabled || this.isLevelSwitching) && (this.hls.currentLevel === sourceIndex)) {
-                                this.onLevelSwitch(Hls.Events.LEVEL_SWITCH, {level: sourceIndex});
+                                this.onLevelSwitch(Hls.Events.LEVEL_SWITCHED, {level: sourceIndex});
                                 this.onFragChanged(Hls.Events.LEVEL_LOADED, {frag: {level: sourceIndex}});
                                 this.getPlayer().currentBitrate = source.getBitrate();
                             } else {
@@ -725,6 +758,14 @@
 			load: function () {
 				if(!this.getPlayer().isInSequence()){
 					this.hls.startLoad();
+				}
+			},
+			/**
+			* Override player method for stop the video element
+			*/
+			stopLoad: function () {
+				if (!this.embedPlayer.isDVR()) {
+					this.hls.stopLoad();
 				}
 			},
 			/**
@@ -773,24 +814,16 @@
 				mw.log("HLS.JS ERROR: " + errorTxt);
 			},
 
-			_ontimeupdate: function(e){
-				this.getPlayer().triggerHelper(e.type, e);
-				var time = Math.round(e.currentTarget.currentTime);
-				if (this.ptsID3Data[time]){
-					this.getPlayer().triggerHelper('onId3Tag', this.ptsID3Data[time]);
-				}
-			},
-
 			_onseeking: function(){
 				// if this is the initial seeking which hls performs to the live edge - do nothing
-				if(this.afterInitialSeeking){
+				if(this.afterInitialSeeking || !this.embedPlayer.isLive()){
 					this.orig_onseeking();
 				}
 			},
 
 			_onseeked: function () {
 				// if this is the initial seeking which hls performs to the live edge - do nothing
-				if(this.afterInitialSeeking){
+				if(this.afterInitialSeeking || !this.embedPlayer.isLive()){
 					this.orig_onseeked();
 				}
 			},
@@ -804,15 +837,91 @@
 			},
 
 			onLiveOnline: function () {
-				if (this.embedPlayer.isDVR()) {
-					this.log(' onLiveOnline:: renew hls instance');
-					this.hls.destroy();
-					var hlsConfig = this.getHlsConfig();
-					this.hls = new Hls(hlsConfig);
-					this.registerHlsEvents();
-					this.mediaAttached = false;
-					this.hls.attachMedia(this.embedPlayer.getPlayerElement());
+				if (this.liveOffline) { // avoid restarting hls while playback
+					this.log(' onLiveOnline:: move from offline to online, restart the playback');
+					this.liveOffline = false;
+					if (this.embedPlayer.isDVR()) {
+						this.log(' onLiveOnline:: renew hls instance');
+						this.hls.destroy();
+						var hlsConfig = this.getHlsConfig();
+						this.hls = new Hls(hlsConfig);
+						this.registerHlsEvents();
+						this.mediaAttached = false;
+						this.hls.attachMedia(this.embedPlayer.getPlayerElement());
+					} else {
+						this.hls.startLoad(this.hls.config.startPosition);
+					}
 				}
+			},
+
+			onLiveOffline: function () {
+				this.liveOffline = true;
+				this.stopLoad();
+			},
+
+			getStartTimeOfDvrWindow: function () {
+				if (this.embedPlayer.isLive() && this.embedPlayer.isDVR()) {
+					try {
+						var nextLoadLevel = this.hls.levels[this.hls.nextLoadLevel],
+							details = nextLoadLevel.details,
+							fragments = details.fragments,
+							start = fragments[0].start + fragments[0].duration;
+						return start - this.hls.config.maxFragLookUpTolerance;
+					}
+					catch (e) {
+						this.log('Unable obtain the start of DVR window');
+						return 0;
+					}
+				} else {
+					return 0;
+				}
+			},
+
+			getLiveEdge : function(){
+				try {
+					var liveEdge;
+					if (this.hls.liveSyncPosition) {
+						liveEdge = this.hls.liveSyncPosition;
+					} else if (this.hls.config.liveSyncDuration) {
+						liveEdge = this.embedPlayer.duration - this.hls.config.liveSyncDuration;
+					} else {
+						liveEdge = this.embedPlayer.duration - this.hls.config.liveSyncDurationCount * this.getLevelDetails().targetduration;
+					}
+					return liveEdge > 0 ? liveEdge : this.embedPlayer.duration;
+				} catch (e) {
+					return this.embedPlayer.duration;
+				}
+			},
+			getLevelDetails: function() {
+				var level =	this.hls.levels &&
+						(this.hls.levels[this.hls.currentLevel] ||
+						this.hls.levels[this.hls.nextLevel] ||
+						this.hls.levels[this.hls.nextAutoLevel] ||
+						this.hls.levels[this.hls.nextLoadLevel]);
+				return level && level.details ? level.details : {};
+			  },
+
+			getLiveTargetBuffer: function() {
+				// if defined in the configuration object, liveSyncDuration will take precedence over the default liveSyncDurationCount
+				if (this.hls.config.liveSyncDuration) {
+					return this.hls.config.liveSyncDuration;
+				} else {
+					return this.hls.config.liveSyncDurationCount * this.getLevelDetails().targetduration;
+				}
+			},
+
+			getTargetBuffer : function() {
+				var targetBufferVal = NaN;
+				if (!this.hls) return NaN;
+					//distance from playback duration is the relevant buffer
+					if (this.embedPlayer.isLive()) {
+					targetBufferVal = this.getLiveTargetBuffer() - (this.embedPlayer.currentTime - this.getLiveEdge());
+				} else {
+					// consideration of the end of the playback in the target buffer calc
+					targetBufferVal = this.embedPlayer.duration - this.embedPlayer.currentTime;
+				}
+				targetBufferVal = Math.min(targetBufferVal, this.hls.config.maxMaxBufferLength + this.getLevelDetails().targetduration);
+				return targetBufferVal;
 			},
 
 			handleMediaError: function () {

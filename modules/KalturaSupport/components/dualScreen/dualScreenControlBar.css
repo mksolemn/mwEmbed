@@ -2,10 +2,15 @@
     position: absolute;
     top: 0;
     right: 0;
-    z-index: 1003;
+    z-index: 999;
     padding: 24px 24px 0 0;
     cursor: pointer;
 }
+
+.controlBar :focus {
+    outline: 1px solid #66CCFF !important;
+}
+
 
 .displayControlBar:after {
     content: '';
@@ -63,6 +68,7 @@
     cursor: pointer;
     transition: transform 0.5s ease-out, filter 0.5s ease-out;
     padding: 10px;
+    text-decoration: none;
 }
 .controlBarBtn:only-child {
     margin-left: 0;
@@ -159,6 +165,11 @@
     #displayControlBar{
         /*width:250px;*/
     }
+    .controlBar {
+        top: 0 !important;
+        padding: 0px 14px 0 0;
+        margin: 15px 0 0 0;
+    }
     .controlBarBtn{
         font-size:26px;
     }
@@ -213,6 +224,9 @@
     overflow: hidden;
     top: 0;
     left: 0;
+}
+.mwPlayerContainer.mobile.mobileSkin .controlBar.dualScreen{
+    top: 60px;
 }
 /*Fonts*/
 @font-face {

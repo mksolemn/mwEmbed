@@ -175,7 +175,11 @@
         };
 
         this.getOwner = function(){
-            return this.cuePoint().userId;
+            if (this.cuePoint().overrideModeratorName !== false) {
+                return this.cuePoint().overrideModeratorName;
+            }else {
+                return this.cuePoint().userId;
+            }
         };
 
         this.getThreadID = function(){
@@ -193,7 +197,7 @@
                 return gM('qna-answer-on-air');
             }
             else{
-                return this.cuePoint().userId;
+                return this.getOwner();
             }
         };
 
@@ -243,8 +247,11 @@
             // Setup player ref:
             this.embedPlayer = embedPlayer;
             this.qnaPlugin = qnaPlugin;
+            this.overrideModeratorName =  qnaPlugin.getConfig('overrideModeratorName') ? qnaPlugin.getConfig('overrideModeratorName') : false;
 
-            this.kPushServerNotification= mw.KPushServerNotification.getInstance(embedPlayer)
+            this.AddNotificationsDelayForQnaThreads();
+
+            this.kPushServerNotification= mw.KPushServerNotification.getInstance(embedPlayer);
             if (embedPlayer.isLive()) {
                 //we first register to all notification before continue to get the existing cuepoints, so we don't get races and lost cue points
                 this.getMetaDataProfile().then(function() {
@@ -255,6 +262,19 @@
                     });
                 });
             }
+        },
+        /**
+         * As we are getting *All* the qna cuePoints ever occurred, we will get old cuePoints and their delete update.
+         * The compromise was to set a delay on the observableArray *just on the start and then removing this delay instead of
+         * flickering announcement or changing the whole app to get a list of cuePoints.
+         */
+        AddNotificationsDelayForQnaThreads: function () {
+            var _this = this;
+
+            _this.QnaThreads.extend({ rateLimit: 500 });
+            setTimeout(function () {
+                _this.QnaThreads.extend({ rateLimit: 0 });
+            }, 500);
         },
         getMetaDataProfile:function() {
             var _this=this;
@@ -501,7 +521,7 @@
 
         // convert a cuePoint from the server to a QnaEntry object
         annotationCuePointToQnaEntry: function(cuePoint) {
-
+            cuePoint.overrideModeratorName = this.overrideModeratorName;
             var metadata=cuePoint.metadata;
             if (cuePoint.relatedObjects &&
                 cuePoint.relatedObjects[this.QandA_ResponseProfile] &&
@@ -607,7 +627,7 @@
                     });
                 });
 
-
+            // Register to Announcements (Public)
             var publicNotifications =  this.kPushServerNotification.createNotificationRequest(
                 _this.QandA_publicNotificationName,
                 {
@@ -617,7 +637,7 @@
                     _this.processQnA(cuePoints);
                 });
 
-
+            // Register to Questions (User Private)
             var userNotifications =  this.kPushServerNotification.createNotificationRequest(
                 _this.QandA_UserNotificationName,
                 {

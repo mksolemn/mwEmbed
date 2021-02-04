@@ -26,11 +26,13 @@
 		midCuePointsArray: [],
 		codeCuePointsArray : [],
 		liveCuePointsIntervalId: null,
+		threshold: 3,
 		supportedCuePoints: [
 			mw.KCuePoints.TYPE.CODE,
 			mw.KCuePoints.TYPE.THUMB,
 			mw.KCuePoints.TYPE.QUIZ_QUESTION
 		],
+		previewCuePointTag:null,
 
 		init: function (embedPlayer) {
 			var _this = this;
@@ -38,7 +40,12 @@
 			this.destroy();
 			// Setup player ref:
 			this.embedPlayer = embedPlayer;
-
+			// grab duplicate-check threshold from player config if exists
+			var playerConfig = this.embedPlayer.playerConfig;
+			if( playerConfig.plugins.dualScreen
+				&& playerConfig.plugins.dualScreen.thresholdForDuplicateCP  ){
+				this.threshold = playerConfig.plugins.dualScreen.thresholdForDuplicateCP;
+			}
 			// Process cue points
 			embedPlayer.bindHelper('KalturaSupport_CuePointsReady' + this.bindPostfix, function () {
 				_this.initSupportedCuepointTypes();
@@ -50,12 +57,16 @@
 					_this.setLiveCuepointsWatchDog();
 				}
 			});
+
+            this.baseThumbAssetUrl=null;
+            this.disableThumbnailAssetUrlFetching=mw.getConfig("EmbedPlayer.disableThumbnailAssetUrlFetching");
 		},
 		destroy: function () {
 			if (this.liveCuePointsIntervalId) {
 				clearInterval(this.liveCuePointsIntervalId);
 				this.liveCuePointsIntervalId = null;
 			}
+            this.baseThumbAssetUrl = null;
 			$(this.embedPlayer).unbind(this.bindPostfix);
 		},
 		/*
@@ -110,48 +121,95 @@
 			});
 			var loadThumbnailWithReferrer = this.embedPlayer.getFlashvars( 'loadThumbnailWithReferrer' );
 			var referrer = window.kWidgetSupport.getHostPageUrl();
-			//Create request data only for cuepoints that have assetId
-			$.each(thumbCuePoint, function (index, item) {
-				// for some thumb cue points, assetId may be undefined from the API.
-				if (typeof item.assetId !== 'undefined') {
-					requestArray.push(
-						{
-							'service': 'thumbAsset',
-							'action': 'getUrl',
-							'id': item.assetId
-						}
-					);
-					responseArray.push(item);
+
+            function processAllCuePoints() {
+            	var urls=[];
+                $.each(thumbCuePoint, function (index, item) {
+                    // for some thumb cue points, assetId may be undefined from the API.
+                    if (typeof item.assetId !== 'undefined') {
+                        urls.push(_this.baseThumbAssetUrl.replace(/thumbAssetId\/([^\/]+)/,"/thumbAssetId/"+item.assetId));
+                    }
+
+                });
+                processThumbnailUrls(urls);
+            }
+            function processThumbnailUrls(data) {
+
+                $.each(data, function (index, thumbnailUrl) {
+                    if (_this.isValidResult(thumbnailUrl)) {
+                        var resItem = responseArray[index];
+                        if (resItem) {
+                            resItem.thumbnailUrl = thumbnailUrl;
+                            if (loadThumbnailWithReferrer) {
+                                resItem.thumbnailUrl += '?options:referrer=' + referrer;
+                            }
+                        }
+                    }
+                });
+                // Since the thumb assets request is async the callback needs to be async as well
+                if (callback) {
+                    setTimeout(function () {
+                        callback();
+                    }, 0);
+                }
+			}
+            function getUrl(index) {
+				if (index>=requestArray.length) {
+					return;
 				}
+                // do the api request
+                _this.getKalturaClient().doRequest({
+                    'service': 'thumbAsset',
+                    'action': 'getUrl',
+                    'id': requestArray[index].id
+                }, function (thumbnailUrl) {
 
-			});
+                    if (_this.isValidResult(thumbnailUrl)) {
+                        _this.baseThumbAssetUrl = thumbnailUrl;
+                        processAllCuePoints();
+                    } else {
+                        getUrl(index+1)
+                    }
+                },false,null,false,"Kaltura.thumbAssetServiceUrl"); //we force the API request to use specific domain
+            }
+            //Create request data only for cuepoints that have assetId
+            $.each(thumbCuePoint, function (index, item) {
+                // for some thumb cue points, assetId may be undefined from the API.
+                if (typeof item.assetId !== 'undefined') {
+                    requestArray.push(
+                        {
+                            'service': 'thumbAsset',
+                            'action': 'getUrl',
+                            'id': item.assetId
+                        }
+                    );
+                    responseArray.push(item);
+                }
 
-			if (requestArray.length) {
-				// do the api request
-				this.getKalturaClient().doRequest(requestArray, function (data) {
-					// Validate result
-					if (requestArray.length === 1){
-						data = [data];
+            });
+            if (requestArray.length) {
+
+				if (!_this.disableThumbnailAssetUrlFetching) {
+					if (_this.baseThumbAssetUrl) {
+						processAllCuePoints();
+					} else {
+                        getUrl(0);
 					}
-					$.each(data, function (index, thumbnailUrl) {
-						if (_this.isValidResult(thumbnailUrl)) {
-							var resItem = responseArray[index];
-							if (resItem){
-								resItem.thumbnailUrl = thumbnailUrl;
-								if (loadThumbnailWithReferrer){
-									resItem.thumbnailUrl += '?options:referrer=' + referrer;
-								}
-							}
-						}
-					});
-				// Since the thumb assets request is async the callback needs to be async as well
-					if (callback) {
-						setTimeout(function () { callback(); }, 0);
-					}
-				});
+				} else {
+                        // do the api request
+                    this.getKalturaClient().doRequest(requestArray, function (data) {
+                        // Validate result
+                        if (requestArray.length === 1) {
+                            data = [data];
+                        }
+                        processThumbnailUrls(data);
+                    },false,null,false,"Kaltura.thumbAssetServiceUrl");
+                }
 			} else {
 				if (callback) {
-					setTimeout(function () { callback(); }, 0);
+					setTimeout(function () {
+						callback();
+					}, 0);
 				}
 			}
 		},
@@ -163,25 +221,50 @@
 				return a.createdAt - b.createdAt;
 			});
 		},
+		handlePushCuepoints: function(cuepoints){
+        	this.fixLiveCuePointArray(cuepoints);
+        	this.updateCuePoints(cuepoints);
+        	this.embedPlayer.triggerHelper("KalturaSupport_PushCuePointsReceived",cuepoints);
+        	this.embedPlayer.triggerHelper("KalturaSupport_CuePointsUpdated", [
+            cuepoints.length
+       	 ]);
+		},
 		setLiveCuepointsWatchDog: function () {
 			var _this = this;
-
 			// Create associative cuepoint array to enable comparing new cuepoints vs existing ones
 			var cuePoints = this.getCuePoints();
-
 			this.fixLiveCuePointArray(this.midCuePointsArray);
 			this.fixLiveCuePointArray(this.codeCuePointsArray);
 			this.fixLiveCuePointArray(cuePoints);
-
 			this.associativeCuePoints = {};
 			$.each(cuePoints, function (index, cuePoint) {
 				_this.associativeCuePoints[cuePoint.id] = cuePoint;
 			});
-
+			// By default use push notification - unless explicitly usePollingForSlides is set to true
+			if(!mw.getConfig("usePollingForSlides")){
+				// if the KPushServerNotification code is not loaded - stop here.
+				if(!mw.KPushServerNotification){
+					mw.log("mw.KCuePoints::Missing KPushServerNotification. Slides for live are not supposed to work");
+					return;
+				}
+				this.kPushServerNotification= mw.KPushServerNotification.getInstance(this.embedPlayer);
+				var thumbsPushNotification =  this.kPushServerNotification.createNotificationRequest(
+				"THUMB_CUE_POINT_READY_NOTIFICATION",
+				{"entryId": _this.embedPlayer.kentryid}, function(cuepoints) {
+					_this.handlePushCuepoints(cuepoints);
+				});
+				var layoutPushNotification =  this.kPushServerNotification.createNotificationRequest(
+				"SLIDE_VIEW_CHANGE_CODE_CUE_POINT",
+				{"entryId": _this.embedPlayer.kentryid}, function(cuepoints) {
+					_this.handlePushCuepoints(cuepoints);
+				});
+				this.kPushServerNotification.registerNotifications([thumbsPushNotification]);
+				this.kPushServerNotification.registerNotifications([layoutPushNotification]);
+				// don't setup the list interval
+				return;
+			}
 			var liveCuepointsRequestInterval = mw.getConfig("EmbedPlayer.LiveCuepointsRequestInterval", 10000);
-
 			mw.log("mw.KCuePoints::start live cue points watchdog, polling rate: " + liveCuepointsRequestInterval + "ms");
-
 			//Start live cuepoint pulling
 			this.liveCuePointsIntervalId = setInterval(function(){
 				_this.requestLiveCuepoints();
@@ -221,7 +304,9 @@
 			var lastCreationTime = _this.getLastCreationTime() + 1;
 			// Only add lastUpdatedAt filter if any cue points already received
 			if (lastCreationTime > 0) {
-				request['filter:createdAtGreaterThanOrEqual'] = lastCreationTime;
+				var cpThreshold  = mw.getConfig("cuePointsThreshold") ? parseInt(mw.getConfig("cuePointsThreshold")) : 60;
+				mw.log("mw.KCuePoints:: Loading cue points with threshold of " + cpThreshold + " seconds : "+ (lastCreationTime - cpThreshold) );
+				request['filter:createdAtGreaterThanOrEqual'] = lastCreationTime - cpThreshold;
 			}
 			this.getKalturaClient().doRequest( request,
 				function (data) {
@@ -383,10 +468,45 @@
 				filteredCuePoints = $.grep( filteredCuePoints, function ( cuePoint ) {
 					var foundCuePointType = _this.validateCuePointAttribute(cuePoint, "cuePointType", type);
 					var foundCuePointSubType = _this.validateCuePointAttribute(cuePoint, "subType", subType);
-					return foundCuePointType && foundCuePointSubType;
+					var checkCuePointsTag = _this.validateCuePointTags(cuePoint, _this.getPreviewCuePointTag());
+					return foundCuePointType && foundCuePointSubType && checkCuePointsTag;
 				} );
+				// filter same CP
+				filteredCuePoints = filteredCuePoints.filter(function( item,index,allInArray ) {
+					return _this.removeDuplicatedCuePoints(allInArray,index);
+				});
 			}
 			return filteredCuePoints;
+		},
+		/**
+		 * check if CP have tag tagName which we do not want to show
+		 * @param cuePoint - Cp which we want to check
+		 * @param tagName - tag name which we do not want to show
+		 * @return {boolean} result - if true - will show current CP
+		 */
+		validateCuePointTags: function(cuePoint, tagName){
+			if(cuePoint && cuePoint.tags && tagName){
+				var result  = cuePoint.tags.indexOf(tagName) === -1;
+				var playerConfig = this.embedPlayer.playerConfig;
+				if(playerConfig && playerConfig.plugins && playerConfig.plugins.dualScreen && playerConfig.plugins.dualScreen.allowAdminCuePoints && !result){
+					result =  true;
+				}
+				return result;
+			}
+			return true;
+		},
+		getPreviewCuePointTag:function () {
+			if(!this.previewCuePointTag){
+				var tagName = "__PREVIEW_CUEPOINT_TAG__";
+				var playerConfig = this.embedPlayer.playerConfig;
+				if(playerConfig && playerConfig.plugins && playerConfig.plugins.dualScreen && playerConfig.plugins.dualScreen.PREVIEW_CUEPOINT_TAG){
+					tagName =  playerConfig.plugins.dualScreen.PREVIEW_CUEPOINT_TAG;
+				}
+				this.previewCuePointTag = tagName;
+				return tagName;
+			}
+			return this.previewCuePointTag;
+			
 		},
 		validateCuePointAttribute: function(cuePoint, attrName, attrValues){
 			var foundAttr = false;
@@ -404,6 +524,46 @@
 				foundAttr = true;
 			}
 			return foundAttr;
+		},
+		/**
+		 * if have same CP earlier - hide current CuePoint
+		 * @param  allCP - array of CP where try to find same CP
+		 * @param  currentCuePointIndex - position from current CP
+		 *
+		 */
+		removeDuplicatedCuePoints:function (allCP, currentCuePointIndex) {
+			var defaultThreshold = this.threshold;
+			var currentCP = allCP[currentCuePointIndex];
+			var prevCP = this.getPrevCPWithCorrectType(allCP,currentCuePointIndex);
+			if(prevCP !== false && currentCP && currentCP.partnerData){
+				var startTimeDelta = Math.abs(currentCP.startTime - prevCP.startTime);
+				var isTheSamePartnerData = currentCP.partnerData === prevCP.partnerData;
+				var isSameTitle = currentCP.title === prevCP.title;
+				var isSameDescription = currentCP.description === prevCP.description;
+				var isTheSameTags = currentCP.tags === prevCP.tags;
+				if(isTheSamePartnerData && isTheSameTags && isSameTitle && isSameDescription && startTimeDelta <= defaultThreshold*1000){
+					return false;
+				}
+			}
+			return true;
+		},
+		getPrevCPWithCorrectType: function (allCP,currentCuePointIndex) {
+			var prevCP = false;
+			var previousIndex = currentCuePointIndex - 1;
+			var currentCP = allCP[currentCuePointIndex];
+			var thresholdTime = this.threshold;
+			for(var i = previousIndex; i>=0;i--){
+				var startTimeDelta = Math.abs(currentCP.startTime - allCP[i].startTime);
+				//if delta of createdAt and startTime is more than thresholdTime - it's not a duplicated cuepoint
+				if(startTimeDelta > thresholdTime*1000){
+					break;
+				}
+				if(allCP[i].cuePointType === currentCP.cuePointType){
+					prevCP = allCP[i];
+					break;
+				}
+			}
+			return prevCP;
 		},
 		/**
 		 * Returns the next cuePoint object for requested time

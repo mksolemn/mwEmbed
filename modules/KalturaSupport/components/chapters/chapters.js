@@ -264,6 +264,12 @@
 				});
 			}
 		},
+		keyDownHandler: function(ev){
+			if(ev.which === 13 || ev.which === 32)
+			{
+				$(ev.target).click();
+			}
+		},
 		addKeyboardShortcuts: function (addKeyCallback) {
 			var _this = this;
 			function toggleItemChapter(toState) {
@@ -459,18 +465,24 @@
 		},
 		createMediaItems: function (items) {
 			var _this = this;
-
 			//Get current item number
 			var orderId = this.mediaList.length;
-			//Map items to mediaList items
-			var mediaItems = $.map(items, function (item) {
+			var clearDuplicatedCP = items.filter(function( item,index,allInArray ) {
+				return _this.getPlayer().kCuePoints.removeDuplicatedCuePoints(allInArray,index);
+			});
+			
+			var previewCuePointTag = _this.getPlayer().kCuePoints.getPreviewCuePointTag();
+			var filterItems = clearDuplicatedCP.filter(function( item ) {
+				return _this.getPlayer().kCuePoints.validateCuePointTags(item, previewCuePointTag);
+			});
+            //Map items to mediaList items
+			var mediaItems = $.map(filterItems, function (item) {
 				var mediaItem;
 				var customData = item.partnerData ? JSON.parse(item.partnerData) : {};
 				var title = item.title || customData.title;
 				var description = item.description || customData.desc;
 				var thumbnailUrl = item.thumbnailUrl || customData.thumbUrl || _this.getThumbUrl(item);
 				var thumbnailRotatorUrl = _this.getConfig('thumbnailRotator') ? _this.getThumRotatorUrl() : '';
-
 				mediaItem = {
 					order: orderId++,
 					tabIndex: 100 + orderId + 1,
@@ -558,6 +570,12 @@
 
 			// Restore list visibility
 			list.show();
+			//update footer buttons tabindex
+			var slideBoxes =  list.find('.slideBox');
+			var lastTabIndex = $(slideBoxes[slideBoxes.length-1]).attr('tabindex');
+			var medialistFooterComponent = this.getMedialistFooterComponent();
+			medialistFooterComponent.find('.slideLocator').attr('tabindex',parseInt(lastTabIndex)+1);
+			medialistFooterComponent.find('.toggleAll').attr('tabindex',parseInt(lastTabIndex)+2);
 		},
 		disableChapterToggle: function(){
 			this.chapterToggleEnabled = false;
@@ -817,8 +835,15 @@
 							_this.showSearchResults( results );
 							typeahead.typeahead( "close" );
 						}
+                        if(e.type === "keyup" && e.keyCode === 27 ){
+						    // close menu and focus the sidebar
+                            _this.getPlayer().triggerHelper("closeSideBarContainer");
+                            _this.getPlayer().triggerHelper( "onEnableKeyboardBinding" );
+                            _this.embedPlayer.getInterface().find(".sideBarContainerReminder").focus();
+                        }
 					} )
 					.on( "focus", function () {
+                        _this.getPlayer().triggerHelper("openSideBarContainer");
 						_this.getPlayer().triggerHelper( "onDisableKeyboardBinding" );
 						//On each focus render width of dropdown menu
 						searchBoxWrapper.find(".tt-dropdown-menu" ).width(searchFormWrapper.width());
@@ -1004,8 +1029,8 @@
 		renderBottomBar: function(){
 			this.getMedialistFooterComponent().empty();
 			var bottomBar = $("<div/>", {"class": "footerWrapper"} )
-					.append($("<span/>", {"class": "slideLocator icon-locator", "title": gM("ks-chapters-locate-active-media")}))
-					.append($("<span/>", {"class": "toggleAll icon-toggleAll", "title": gM("ks-chapters-toggle-all-chapter")}));
+					.append($("<span/>", {"class": "slideLocator icon-locator", "title": gM("ks-chapters-locate-active-media")}).attr({'aria-label':gM("ks-chapters-slider-locator")}))
+					.append($("<span/>", {"class": "toggleAll icon-toggleAll", "title": gM("ks-chapters-toggle-all-chapter")}).attr({'aria-label':gM("ks-chapters-toggle-all-chapter")}));
 			this.getMedialistFooterComponent().append(bottomBar);
 		},
 		isValidResult: function (data) {
@@ -1269,11 +1294,27 @@
 					}
 				}
 			});
+			this.onItemKey = function (e) {
+				var _this = this;
+                if(e.keyCode === 13){
+                    var seekto = $(e.target).attr("data-starttime");
+                    if(seekto){
+                    	this.embedPlayer.sendNotification("doSeek",seekto);
+					}
+                }
+                if(e.keyCode === 27){
+                    // close menu and focus the sidebar
+                    _this.getPlayer().triggerHelper("closeSideBarContainer");
+                    _this.getPlayer().triggerHelper( "onEnableKeyboardBinding" );
+                    _this.embedPlayer.getInterface().find(".sideBarContainerReminder").focus();
+                }
+            };
 
 			var mediaBoxes = this.getMediaListDomElements();
 			mediaBoxes.on('mousedown mouseup mouseout', function(){
 				this.blur();
-			});
+			})
+			.on('keyup', $.proxy(this.onItemKey , this));
 
 			this.getComponent().find(".slideBoxToggle")
 					.off("click").on("click", function(e){
@@ -1284,7 +1325,7 @@
 
 			this.getMedialistFooterComponent()
 					.find(".toggleAll" )
-					.off("click").on("click", function(){
+					.off("click").off("keydown").on("click", function(){
 				if (_this.chapterToggleEnabled) {
 					var chapters = _this.getMediaListDomElements().filter( ".chapterBox" );
 					var collapsedChapters = chapters.filter( "[data-chapter-collapsed=true]" );
@@ -1297,13 +1338,13 @@
 						_this.toggleChapter( collapsedChapters );
 					}
 				}
-			});
+			}).on('keydown',_this.keyDownHandler);
 
 			this.getMedialistFooterComponent()
 					.find(".slideLocator" )
-					.off("click").on("click", function(){
+					.off("click").off("keydown").on("click", function(){
 				_this.scrollToActiveItem();
-			});
+			}).on('keydown',_this.keyDownHandler);
 		},
 		collapseAll: function(){
 			if (this.chapterToggleEnabled) {

@@ -78,7 +78,7 @@ kWidget.api.prototype = {
 	/**
 	 * Do an api request and get data in callback
 	 */
-	doRequest: function ( requestObject, callback,skipKS, errorCallback, withProxyData){
+	doRequest: function ( requestObject, callback,skipKS, errorCallback, withProxyData, apiHost){ //apihost: we force the API request to use specific domain
 		var _this = this;
 		var param = {};
 		var globalCBName = null;
@@ -106,9 +106,9 @@ kWidget.api.prototype = {
 
 		// Add kalsig to query:
 		param[ 'kalsig' ] = this.hashCode( kWidget.param( param ) );
-		
-		// Remove service tag ( hard coded into the api url )
+
 		var serviceType = param['service'];
+
 		delete param['service'];
 
 		var timeoutError = setTimeout(function(){
@@ -154,7 +154,7 @@ kWidget.api.prototype = {
 			if ( forceJSONP ){
 				throw "forceJSONP";
 			}
-			this.xhrRequest( _this.getApiUrl( serviceType ), param, function( data ){
+			this.xhrRequest( _this.getApiUrl( serviceType, apiHost  ), param, function( data ){
 				handleDataResult( data );
 			});
 		} catch(e){
@@ -215,7 +215,7 @@ kWidget.api.prototype = {
 	/**
 	 * Do an xhr request
 	 */
-	xhrPost: function( url, param, callback ){
+	xhrPost: function( url, param, callback, headers ){
 		var _this = this;
 		var xmlhttp = new XMLHttpRequest();
 		xmlhttp.onreadystatechange = function(){
@@ -224,8 +224,17 @@ kWidget.api.prototype = {
 			}
 		}
 		xmlhttp.open("POST", url, true);
-		xmlhttp.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
-		xmlhttp.send( kWidget.param( param ) );
+		if (headers) {
+			for (var key in headers) {
+				if (headers.hasOwnProperty(key)) {
+					xmlhttp.setRequestHeader(key, headers[key]);
+				}
+			}
+			xmlhttp.send( param );
+		} else {
+			xmlhttp.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
+			xmlhttp.send( kWidget.param( param ) );
+		}
 	},
 	handleKsServiceRequest: function( requestObject ){
 		var param = {};
@@ -291,7 +300,7 @@ kWidget.api.prototype = {
 		}
 		return param;
 	},
-	getApiUrl : function( serviceType ){
+	getApiUrl : function( serviceType, apiHost ) {
 		var serviceUrl = mw.getConfig( 'Kaltura.ServiceUrl' );
 		if( serviceType && serviceType == 'stats' &&  mw.getConfig( 'Kaltura.StatsServiceUrl' ) ) {
 			serviceUrl = mw.getConfig( 'Kaltura.StatsServiceUrl' );
@@ -302,7 +311,11 @@ kWidget.api.prototype = {
 		if( serviceType && serviceType == 'analytics' &&  mw.getConfig( 'Kaltura.AnalyticsUrl' ) ) {
 			serviceUrl = mw.getConfig( 'Kaltura.AnalyticsUrl' );
 		}
-		return serviceUrl + mw.getConfig( 'Kaltura.ServiceBase' ) + serviceType;
+        if (apiHost ) {
+            serviceUrl = mw.getConfig( apiHost );
+
+        }
+        return serviceUrl + mw.getConfig( 'Kaltura.ServiceBase' ) + serviceType;
 	},
 	hashCode: function( str ){
 		return md5(str);

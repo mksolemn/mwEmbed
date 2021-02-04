@@ -33,7 +33,7 @@ class kalturaIframeClass {
 
 
 		// No entry Id and Reference Id were found
-		if( count( $this->getEntryResult() ) == 0 ) {
+		if(!$this->getEntryResult()) {
 			$setError = true;
 			// Try to grab entry Id from the widget.
 			// Only if it's not the default widget ( does not start with underscode )
@@ -49,7 +49,7 @@ class kalturaIframeClass {
 			if( $setError ) {
 				$this->error = self::NO_ENTRY_ID_FOUND;
 			}
-		}		
+		}
 	}
 
 	function getIframeId(){
@@ -455,7 +455,7 @@ class kalturaIframeClass {
 		$versionParam ='';
 		$urid = $this->request->get('urid');
 		if( $urid ){
-			$versionParam .= '&urid=' . htmlspecialchars( $urid );
+			$versionParam .= '&urid=' . htmlspecialchars( $urid, ENT_QUOTES );
 		}
 		if( $this->request->get('debug') || $wgEnableScriptDebug ){
 			$versionParam .= '&debug=true';
@@ -469,7 +469,7 @@ class kalturaIframeClass {
 		foreach( $parmList as $param ){
 			$val = $this->request->get( $param );
 			if( $val ){
-				$paramString.= $and. $param . '=' . htmlspecialchars( $val );
+				$paramString.= $and. $param . '=' . htmlspecialchars( $val, ENT_QUOTES );
 				$and = '&';
 			}
 		}
@@ -1306,7 +1306,6 @@ HTML;
 	<?php if($wgRemoteWebInspector && $wgEnableScriptDebug){
 		echo '<script src="' . $wgRemoteWebInspector . '"></script>';
 	 } ?>
-	<link href='//fonts.googleapis.com/css?family=Lato:400,700' rel='stylesheet' type='text/css'>
 	<?php if (isset($flashvars) && isset($flashvars['nativeCallout'])){
 	    $nativeCallout = json_decode($flashvars['nativeCallout'],true);
         if (isset($nativeCallout) && ($nativeCallout['plugin'] ===  true)){
@@ -1338,7 +1337,7 @@ HTML;
     var customCSS = <?php echo $customCss ?>;
     if ( window['kWidget'] && window["kalturaIframePackageData"] && window["kalturaIframePackageData"].playerConfig && window["kalturaIframePackageData"].playerConfig.layout  && window["kalturaIframePackageData"].playerConfig.vars ) {
            var skin = window["kalturaIframePackageData"].playerConfig.layout ? window["kalturaIframePackageData"].playerConfig.layout.skin : "kdark";
-           var mobileSkin = window['kWidget'].isChromeCast() || ( window["kalturaIframePackageData"].playerConfig.vars["EmbedPlayer.EnableMobileSkin"] === true && skin === "kdark" && window['kWidget'].isMobileDevice() && !window['kWidget'].isWindowsPhone() );
+           var mobileSkin = window['kWidget'].isChromeCast() || ( window["kalturaIframePackageData"].playerConfig.vars["EmbedPlayer.EnableMobileSkin"] === true && skin === "kdark" && window['kWidget'].isMobileDevice() );
     }
     if (  customCSS && mobileSkin === false ) {
         var head = document.head || document.getElementsByTagName('head')[0];

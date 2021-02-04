@@ -152,7 +152,7 @@
             this.castContext = cast.framework.CastContext.getInstance();
             this.castSession = this.castContext.getCurrentSession();
             this.receiverName = this.getReceiverName();
-            if ( this.castSession.getSessionState() === cast.framework.SessionState.SESSION_RESUMED ) {
+            if ( this.castSession.getSessionState() === cast.framework.SessionState.SESSION_RESUMED  && !(mw.isChromeVersionGreaterThan(73) && mw.isAndroid())) {
                 if ( !this.remotePlayer.playerState ) {
                     // TODO : Handle refresh page after playback ended
                     // TODO : Handle refresh page in the middle of loading media
@@ -265,7 +265,8 @@
             // Setup load request
             var loadRequest = new chrome.cast.media.LoadRequest( mediaInfo );
             loadRequest.autoplay = this.autoPlay;
-            loadRequest.currentTime = this.getCurrentTime();
+            // On live start from the live edge, on VOD start from the player current time
+            loadRequest.currentTime = this.isLive() ? 0 : this.getCurrentTime();
             mw.log( "EmbedPlayerChromecast:: loadMedia:: Load request sent", loadRequest );
             // Call load media
             var mediaLoadedHandler = (this.isLive() ? this.onLiveMediaLoaded : this.onMediaLoaded);
@@ -344,9 +345,11 @@
         updateAdsUi: function ( customData ) {
             if ( customData && customData.adsInfo ) {
                 if ( customData.adsInfo.isPlayingAd ) {
+                    this.isPlayingAd = true;
                     this.hideSpinner();
                     this.disablePlayControls( [ 'playPauseBtn', 'fullScreenBtn', 'volumeControl' ] );
                 } else {
+                    this.isPlayingAd = false;
                     this.enablePlayControls();
                 }
             }
@@ -394,7 +397,7 @@
         /**** Live ****/
 
         backToLive: function () {
-            if ( this.getCurrentTime() > 0 && !this.movingBackToLive ) {
+            if ( !this.isPlayingAd && this.getCurrentTime() > 0 && !this.movingBackToLive ) {
                 this.movingBackToLive = true;
                 this.loadMedia();
             }
@@ -551,7 +554,7 @@
         getEmbedConfig: function () {
             var embedConfig = {
                 'publisherID': this.kwidgetid.substr( 1 ),
-                'uiconfID': this.kuiconfid,
+                'uiconfID': this.getKalturaConfig('chromecast').uiconf_id || this.kuiconfid,
                 'entryID': this.kentryid,
                 'flashVars': this.getFlashVars()
             };
@@ -561,7 +564,7 @@
 
         getReceiverConfig: function () {
             var receiverConfig = this.getKalturaConfig('chromecast').receiverConfig || {};
-            receiverConfig.defaultLanguageKey = this.beforeCastParams.captions.length === 1 ? this.beforeCastParams.captions[0].lang : null;
+            receiverConfig.defaultLanguageKey = this.beforeCastParams.captions ? this.beforeCastParams.captions.language : null;
             return receiverConfig;
         },
 
@@ -605,7 +608,7 @@
 
         getProxyData: function () {
             mw.log( "EmbedPlayerChromecast:: getProxyData" );
-            var proxyData = mw.getConfig( "proxyData" );
+            var proxyData = this.getKalturaConfig("chromecast", "proxyData" );
             if ( proxyData ) {
                 var _this = this;
                 var recursiveIteration = function ( object ) {

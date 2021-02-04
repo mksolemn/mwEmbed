@@ -981,6 +981,7 @@
 			iframe.setAttribute('allowfullscreen', true);
 			iframe.setAttribute('webkitallowfullscreen', true);
 			iframe.setAttribute('mozallowfullscreen', true);
+			iframe.setAttribute('allow', 'autoplay *; fullscreen *; encrypted-media *');
 
 			// copy the target element css to the iframe proxy style:
 			iframe.style.cssText = iframeCssText;
@@ -1058,6 +1059,15 @@
 			};
 		},
 
+		getProtocol: function() {
+            var protocolString = window.location.protocol.slice(0, -1);
+            if (protocolString.match('^http')) {
+            	return protocolString;
+			} else {
+				return "https";
+			}
+		},
+
 		requestPlayer: function(iframeRequest, widgetElm, targetId, cbName, settings){
 			var _this = this;
 			if ( iframeRequest.length > 2083 ){
@@ -1072,9 +1082,9 @@
 					delete settings.flashvars.jsonConfig;
 					url += '?' + this.getIframeRequest(widgetElm, settings);
 					requestData = {"jsonConfig": jsonConfig};
-					url += "&protocol=" + location.protocol.slice(0, -1);
+					url += "&protocol=" + this.getProtocol();
 				} else {
-					url += "?protocol=" + location.protocol.slice(0, -1);
+					url += "?protocol=" + this.getProtocol();
 				}
 
 				$.ajax({
@@ -1083,16 +1093,16 @@
 					url: url,
 					data: requestData
 				})
-				.success(function (data) {
+				.done(function (data) {
 					var contentData = {content: data};
 					window[cbName](contentData);
 				})
-				.error(function (e) {
+				.fail(function (e) {
 					_this.log("Error in player iframe request")
 				})
 			} else {
 				var iframeUrl = this.getIframeUrl() + '?' + iframeRequest;
-				iframeUrl += "&protocol=" + location.protocol.slice(0, -1);
+				iframeUrl += "&protocol=" + this.getProtocol();
 				// Store iframe urls
 				this.iframeUrls[ targetId ] = iframeUrl;
 				// do an iframe payload request:
@@ -1145,7 +1155,7 @@
 			}
 
 			// Check if we need to capture a play event ( iOS sync embed call )
-			if (settings.captureClickEventForiOS && (this.isSafari() || this.isAndroid())) {
+			if (settings.captureClickEventForiOS && ((this.isSafari() && !this.isChrome()) || this.isAndroid())) {
 				this.captureClickWrapedIframeUpdate(targetId, requestSettings, iframe);
 			} else {
 				// get the callback name:
@@ -1699,11 +1709,11 @@
 								dataType: 'text',
 								url: _this.getIframeUrl(),
 								data: _this.embedSettingsToUrl(settings)
-							}).success(function (data) {
+							}).done(function (data) {
 									var contentData = {content: data};
 									window[cbName](contentData);
 								})
-								.error(function (e) {
+								.fail(function (e) {
 									_this.log("Error in player iframe request");
 							});
 						}else{
@@ -1836,6 +1846,9 @@
 		isSafari: function () {
             return (/safari/).test(navigator.userAgent.toLowerCase());
         },
+		isChrome: function () {
+			return (/chrome/).test(navigator.userAgent.toLowerCase());
+		},
 		isWindowsDevice: function () {
 			var appVer = navigator.appVersion;
 			return  ((appVer.indexOf("Win") != -1 &&
@@ -1845,10 +1858,16 @@
 		 * Checks for mobile devices
 		 **/
 		isMobileDevice: function () {
-			return (this.isIOS() || this.isAndroid() || this.isWindowsDevice() || mw.getConfig("EmbedPlayer.ForceNativeComponent")  || mw.getConfig("EmbedPlayer.SimulateMobile") === true );
+			return (this.isIOS() || this.isIpadOS() || this.isAndroid() || this.isWindowsDevice() || mw.getConfig("EmbedPlayer.ForceNativeComponent")  || mw.getConfig("EmbedPlayer.SimulateMobile") === true );
 		},
 		isChromeCast: function(){
 			return (/CrKey/.test(navigator.userAgent));
+		},
+		isIpadOS: function () {
+			return (this.isSafari() && this.isTouchDevice && !this.isIOS());
+		},
+		isTouchDevice: function () {
+			return !!('ontouchstart' in window) || ( mw.getConfig("EmbedPlayer.EnableMobileSkin") === true && mw.getConfig("EmbedPlayer.SimulateMobile") === true);
 		},
 		/**
 		 * Checks if a given uiconf_id is html5 or not

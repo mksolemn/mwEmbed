@@ -1124,6 +1124,7 @@
 			var stopSeek = {value: false};
 			this.triggerHelper('preSeek', [seekTime, stopAfterSeek, stopSeek]);
 			if (stopSeek.value) {
+				this.seeking = false;
 				return false;
 			}
 
@@ -1752,6 +1753,7 @@
 				this.postSequenceFlag = false;
 				this.shouldEndClip = true;
 				this.mediaLoadedFlag = false;
+                window.kWidgetSupport.resetGUID();
 			}
 
 			// Add a loader to the embed player:
@@ -2119,6 +2121,7 @@
 			embedCode += 'width=&quot;' + this.getPlayerWidth() + '&quot; ';
 			embedCode += 'height=&quot;' + this.getPlayerHeight() + '&quot; ';
 			embedCode += 'allowfullscreen webkitallowfullscreen mozAllowFullScreen ';
+			embedCode += "allow='autoplay *; fullscreen *; encrypted-media *' ";
 			embedCode += 'frameborder=&quot;0&quot; ';
 
 			// Close up the embedCode tag:
@@ -2855,16 +2858,21 @@
 		updatePlayheadStatus: function () {
 			if ( this.currentTime >= 0 && this.duration ) {
 				if (!this.userSlide && !this.seeking ) {
-					var playHeadPercent = ( this.currentTime - this.startOffset ) / this.duration;
-					this.updatePlayHead(playHeadPercent);
-					//update liveEdgeOffset
-					if(this.isDVR()){
+					var playHeadPercent;
+					if(this.isDVR()) {
+						var startTimeOfDvrWindow = this.getStartTimeOfDvrWindow();
+						playHeadPercent = (this.currentTime - startTimeOfDvrWindow) / (this.duration - startTimeOfDvrWindow);
+						this.updatePlayHead(playHeadPercent);
+						//update liveEdgeOffset
 						var perc = parseInt(playHeadPercent*1000);
 						if(perc>998) {
 							this.liveEdgeOffset = 0;
 						}else {
 							this.liveEdgeOffset = this.duration - perc/1000 * this.duration;
 						}
+					} else {
+						playHeadPercent = (this.currentTime - this.startOffset) / this.duration;
+						this.updatePlayHead(playHeadPercent);
 					}
 				}
 			}
@@ -3409,12 +3417,20 @@
 			//adaptive bitrate
 			return this.currentBitrate;
 		},
+		// needs to be override
+		getTargetBuffer: function(){
+			return null;
+		},
 
 		/*
 		 * get current offset from the playable live edge inside DVR window (positive number for negative offset)
 		 */
 		getLiveEdgeOffset: function () {
 			return this.liveEdgeOffset;
+		},
+
+		getStartTimeOfDvrWindow: function () {
+			return 0;
 		},
 
 		/*
@@ -3430,8 +3446,20 @@
 			}
 		},
 
+		showTextTrack: function () {
+
+		},
+
+		hideTextTrack: function () {
+
+		},
+
+		getActiveSubtitle: function () {
+			return null;
+		},
+
 		getCurrentBufferLength: function(){
-			mw.log("Error: getPlayerElementTime should be implemented by embed library");
+			mw.log("Error: getCurrentBufferLength should be implemented by embed library");
 		}
 
 	};
